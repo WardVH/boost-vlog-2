@@ -7,30 +7,34 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 from database import SessionLocal
-from models import TimelineItem, MusicItem, Asset
+import shutil
+from models import TimelineItem, MusicItem, Asset, TitleItem
 from routes.ws import broadcast
+from config import BROLL_AUDIO_VOLUME
 from services.ducker import compute_volume_envelope, envelope_to_ffmpeg_expr
 from routes.music import _build_timeline_segments
 
 _OUT_TIME_RE = re.compile(r"out_time_us=(\d+)")
 
 
-def _resolve_source_and_range(item: TimelineItem) -> tuple[str, float, float] | None:
-    """Returns (source_path, start_time, end_time) for a timeline item."""
+def _resolve_source_and_range(item: TimelineItem) -> tuple[str, float, float, str | None] | None:
+    """Returns (source_path, start_time, end_time, clip_type) for a timeline item."""
     if item.sub_clip_id and item.sub_clip:
         sub = item.sub_clip
         parent = sub.parent_clip
         if parent:
-            return (parent.source_path, sub.start_time, sub.end_time)
+            ct = parent.clip_type.value if parent.clip_type else None
+            return (parent.source_path, sub.start_time, sub.end_time, ct)
     if item.clip_id and item.clip:
         clip = item.clip
-        return (clip.source_path, 0, clip.duration or 0)
+        ct = clip.clip_type.value if clip.clip_type else None
+        return (clip.source_path, 0, clip.duration or 0, ct)
     return None
 
 
-async def _probe_audio_streams(segments: list[tuple[str, float, float]]) -> dict[str, bool]:
+async def _probe_audio_streams(segments: list[tuple[str, float, float, str | None]]) -> dict[str, bool]:
     """Check which source files have audio streams. Returns {path: has_audio}."""
-    unique_paths = set(source for source, _, _ in segments)
+    unique_paths = set(seg[0] for seg in segments)
 
     async def _probe(path: str) -> tuple[str, bool]:
         proc = await asyncio.create_subprocess_exec(
@@ -46,8 +50,9 @@ async def _probe_audio_streams(segments: list[tuple[str, float, float]]) -> dict
 
 
 def _build_concat_filter(
-    segments: list[tuple[str, float, float]],
+    segments: list[tuple[str, float, float, str | None]],
     has_audio: dict[str, bool],
+    has_music: bool = False,
     width: int = 1920,
     height: int = 1080,
     fps: int = 30,
@@ -59,13 +64,14 @@ def _build_concat_filter(
     # Map unique source paths to input indices
     source_to_idx: dict[str, int] = {}
     input_args = []
-    for source, _, _ in segments:
+    for seg in segments:
+        source = seg[0]
         if source not in source_to_idx:
             source_to_idx[source] = len(source_to_idx)
             input_args.extend(["-i", source])
 
     filter_parts = []
-    for i, (source, start, end) in enumerate(segments):
+    for i, (source, start, end, clip_type) in enumerate(segments):
         inp = source_to_idx[source]
         duration = end - start
 
@@ -80,8 +86,11 @@ def _build_concat_filter(
         if has_audio.get(source, False):
             af = (
                 f"[{inp}:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
-                f"aresample=48000,aformat=channel_layouts=stereo[a{i}]"
+                f"aresample=48000,aformat=channel_layouts=stereo"
             )
+            if has_music and clip_type == "broll":
+                af += f",volume={BROLL_AUDIO_VOLUME}"
+            af += f"[a{i}]"
         else:
             af = (
                 f"anullsrc=r=48000:cl=stereo[_sil{i}];"
@@ -159,12 +168,19 @@ async def render_timeline(project_id: int, output_path: str) -> str:
 
         await broadcast(project_id, "render_progress", {"percent": 0, "stage": "rendering"})
 
+        music_items = (
+            db.query(MusicItem)
+            .filter(MusicItem.project_id == project_id)
+            .order_by(MusicItem.start_time)
+            .all()
+        )
+
         logger.info("Rendering %d segments for project %d", len(segments), project_id)
         await broadcast(project_id, "render_progress", {"percent": 0, "stage": "initializing"})
         has_audio = await _probe_audio_streams(segments)
         logger.info("Audio probe results: %s", has_audio)
-        input_args, filter_complex = _build_concat_filter(segments, has_audio)
-        total_duration = sum(end - start for _, start, end in segments)
+        input_args, filter_complex = _build_concat_filter(segments, has_audio, has_music=bool(music_items))
+        total_duration = sum(end - start for _, start, end, _ in segments)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cmd = ["ffmpeg", "-y", *input_args]
@@ -186,17 +202,20 @@ async def render_timeline(project_id: int, output_path: str) -> str:
 
             await _run_ffmpeg_with_progress(cmd, total_duration, project_id, 0, 70)
 
-        # Check for music items and mix if present
-        music_items = (
-            db.query(MusicItem)
-            .filter(MusicItem.project_id == project_id)
-            .order_by(MusicItem.start_time)
-            .all()
-        )
-
         if music_items:
             await broadcast(project_id, "render_progress", {"percent": 70, "stage": "mixing music"})
             await _mix_music(items, music_items, output_path, project_id)
+
+        # Burn title overlays
+        title_items = (
+            db.query(TitleItem)
+            .filter(TitleItem.project_id == project_id)
+            .order_by(TitleItem.start_time)
+            .all()
+        )
+        if title_items:
+            await broadcast(project_id, "render_progress", {"percent": 96, "stage": "burning titles"})
+            await _burn_titles(title_items, output_path)
 
         await broadcast(project_id, "render_progress", {"percent": 100, "stage": "done"})
         await broadcast(project_id, "render_done", {"output_path": output_path})
@@ -286,5 +305,63 @@ async def _mix_music(
         await broadcast(project_id, "render_progress", {"percent": 95, "stage": "mixing music"})
 
         # Replace original output with mixed version
-        import shutil
         shutil.move(mixed_path, video_path)
+
+
+def _find_inter_font() -> str | None:
+    """Find Inter variable font on the system."""
+    candidates = [
+        Path.home() / "Library/Fonts/Inter-VariableFont_opsz,wght.ttf",
+        Path("/usr/share/fonts/truetype/inter/Inter-VariableFont_opsz,wght.ttf"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return None
+
+
+async def _burn_titles(
+    title_items: list[TitleItem],
+    video_path: str,
+) -> None:
+    """Burn title overlays into the video using FFmpeg drawtext filter."""
+    font_path = _find_inter_font()
+    font_arg = f":fontfile='{font_path}'" if font_path else ""
+
+    drawtext_parts = []
+    for ti in title_items:
+        escaped = ti.text.replace("'", "'\\''").replace(":", "\\:").replace(",", "\\,")
+        # Wide blurry black shadow (multiple offset shadows for blur effect)
+        dt = (
+            f"drawtext=text='{escaped}'"
+            f"{font_arg}"
+            f":fontsize=72"
+            f":fontcolor=white"
+            f":shadowcolor=black@0.8:shadowx=4:shadowy=4"
+            f":borderw=4:bordercolor=black@0.5"
+            f":x=(w-text_w)/2"
+            f":y=h*0.85-text_h/2"
+            f":enable='between(t,{ti.start_time},{ti.end_time})'"
+        )
+        drawtext_parts.append(dt)
+
+    filter_str = ",".join(drawtext_parts)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        titled_path = str(Path(tmpdir) / "titled.mp4")
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-vf", filter_str,
+            "-c:v", "h264_videotoolbox", "-q:v", "65",
+            "-c:a", "copy",
+            titled_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Title burn failed: {stderr.decode()[-500:]}")
+
+        shutil.move(titled_path, video_path)

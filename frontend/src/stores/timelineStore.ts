@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { RefObject } from "react";
 import type { PlayerRef } from "@remotion/player";
-import type { Project, Clip, TimelineItem, Asset, MusicItem, VolumeKeypoint } from "../types";
+import type { Project, Clip, TimelineItem, Asset, MusicItem, TitleItem, VolumeKeypoint } from "../types";
 
 interface TimelineStore {
   project: Project | null;
@@ -58,6 +58,13 @@ interface TimelineStore {
   setMusicItems: (items: MusicItem[]) => void;
   setVolumeEnvelope: (envelope: VolumeKeypoint[]) => void;
   setMusicLoading: (loading: boolean) => void;
+
+  // Title overlays
+  titleItems: TitleItem[];
+  titleLoading: boolean;
+  setTitleItems: (items: TitleItem[]) => void;
+  setTitleLoading: (loading: boolean) => void;
+  updateTitleItem: (id: number, updates: Partial<TitleItem>) => void;
 
   // Auto-save status
   saveStatus: "idle" | "saving" | "saved";
@@ -146,6 +153,17 @@ export const useTimelineStore = create<TimelineStore>((set) => ({
   setMusicItems: (musicItems) => set({ musicItems }),
   setVolumeEnvelope: (volumeEnvelope) => set({ volumeEnvelope }),
   setMusicLoading: (musicLoading) => set({ musicLoading }),
+
+  titleItems: [],
+  titleLoading: false,
+  setTitleItems: (titleItems) => set({ titleItems }),
+  setTitleLoading: (titleLoading) => set({ titleLoading }),
+  updateTitleItem: (id, updates) =>
+    set((state) => ({
+      titleItems: state.titleItems.map((t) =>
+        t.id === id ? { ...t, ...updates } : t
+      ),
+    })),
 
   saveStatus: "idle" as const,
   setSaveStatus: (saveStatus) => set({ saveStatus }),

@@ -1,0 +1,130 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from database import get_db
+from models import TitleItem, TimelineItem, Project
+from schemas import TitleItemResponse, TitleItemUpdate, TitleAutoResponse
+from services.title_overlay_generator import generate_title_overlays
+
+router = APIRouter()
+
+
+def _build_timestamped_transcript(items: list[TimelineItem]) -> tuple[str, float]:
+    """Walk ordered timeline items and produce a timestamped transcript string."""
+    parts = []
+    cursor = 0.0
+    for item in items:
+        if item.sub_clip_id and item.sub_clip:
+            sub = item.sub_clip
+            duration = sub.end_time - sub.start_time
+            clip = sub.parent_clip
+        elif item.clip_id and item.clip:
+            clip = item.clip
+            duration = clip.duration or 0
+        else:
+            continue
+
+        if duration < 0.034:
+            continue
+
+        transcript = clip.transcript if clip else None
+        if transcript:
+            parts.append(f"[{cursor:.1f}s - {cursor + duration:.1f}s] {transcript}")
+        cursor += duration
+
+    return "\n".join(parts), cursor
+
+
+@router.get("/{project_id}", response_model=TitleAutoResponse)
+def get_titles(project_id: int, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    items = (
+        db.query(TitleItem)
+        .filter(TitleItem.project_id == project_id)
+        .order_by(TitleItem.start_time)
+        .all()
+    )
+    return TitleAutoResponse(items=[TitleItemResponse.model_validate(i) for i in items])
+
+
+@router.post("/{project_id}/auto", response_model=TitleAutoResponse)
+def auto_generate_titles(project_id: int, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    timeline_items = (
+        db.query(TimelineItem)
+        .filter(TimelineItem.project_id == project_id)
+        .order_by(TimelineItem.position)
+        .all()
+    )
+
+    transcript_text, total_duration = _build_timestamped_transcript(timeline_items)
+    if not transcript_text or total_duration <= 0:
+        raise HTTPException(400, "No transcript available — process clips first")
+
+    overlays = generate_title_overlays(transcript_text, total_duration)
+
+    # Replace existing titles
+    db.query(TitleItem).filter(TitleItem.project_id == project_id).delete()
+
+    new_items = []
+    for o in overlays:
+        item = TitleItem(
+            project_id=project_id,
+            text=o["text"],
+            start_time=o["start_time"],
+            end_time=o["end_time"],
+        )
+        db.add(item)
+        new_items.append(item)
+
+    db.commit()
+    for item in new_items:
+        db.refresh(item)
+
+    return TitleAutoResponse(items=[TitleItemResponse.model_validate(i) for i in new_items])
+
+
+@router.put("/{project_id}/items/{item_id}", response_model=TitleItemResponse)
+def update_title_item(
+    project_id: int, item_id: int, body: TitleItemUpdate, db: Session = Depends(get_db)
+):
+    item = (
+        db.query(TitleItem)
+        .filter(TitleItem.id == item_id, TitleItem.project_id == project_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(404, "Title item not found")
+
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(item, field, value)
+
+    db.commit()
+    db.refresh(item)
+    return TitleItemResponse.model_validate(item)
+
+
+@router.delete("/{project_id}")
+def clear_titles(project_id: int, db: Session = Depends(get_db)):
+    db.query(TitleItem).filter(TitleItem.project_id == project_id).delete()
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{project_id}/items/{item_id}")
+def delete_title_item(project_id: int, item_id: int, db: Session = Depends(get_db)):
+    rows = (
+        db.query(TitleItem)
+        .filter(TitleItem.id == item_id, TitleItem.project_id == project_id)
+        .delete()
+    )
+    if rows == 0:
+        raise HTTPException(404, "Title item not found")
+    db.commit()
+    return {"ok": True}

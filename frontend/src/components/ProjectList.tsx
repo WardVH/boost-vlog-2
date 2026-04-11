@@ -18,6 +18,7 @@ export function ProjectList() {
     setThumbnailUrls, setThumbnailText,
     setRenderProgress, setYoutubeUploadProgress, setYoutubeUploadResult, setYoutubeUploadError,
     setMusicItems, setVolumeEnvelope,
+    setTitleItems,
   } = useTimelineStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +75,12 @@ export function ProjectList() {
           setVolumeEnvelope(data.volume_envelope || []);
         }
       });
+    // Load title items
+    fetch(`/api/titles/${id}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data) setTitleItems(data.items || []);
+      });
     setIsWatching(true);
     // Start watching in background — new clips arrive via websocket
     setScanningFiles(true);
@@ -126,6 +133,7 @@ export function ProjectList() {
       setYoutubeUploadProgress(null);
       setYoutubeUploadResult(null);
       setYoutubeUploadError(null);
+      setTitleItems([]);
       // Navigate immediately — don't wait for scan
       setProject(proj);
       setClips([]);

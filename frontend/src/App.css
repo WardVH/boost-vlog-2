@@ -1342,3 +1342,49 @@ input[type="text"]:focus {
   color: #c084fc;
   font-size: 11px;
 }
+
+/* ── Title Track on Timeline ── */
+
+.title-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title-info {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.tl-action-render.title {
+  background: rgba(34, 211, 238, 0.2);
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  border-radius: 4px;
+  padding: 2px 6px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: default;
+}
+
+.tl-action-render.title .tl-action-label {
+  color: #22d3ee;
+  font-size: 11px;
+}
+
+.tl-action-render.title.editing {
+  padding: 0;
+}
+
+.title-edit-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: rgba(34, 211, 238, 0.15);
+  color: #22d3ee;
+  font-size: 11px;
+  padding: 2px 6px;
+  font-family: inherit;
+}

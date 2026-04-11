@@ -1,5 +1,5 @@
 import type { TimelineRow, TimelineAction } from "@xzdarcy/react-timeline-editor";
-import type { TimelineItem, MusicItem, VolumeKeypoint } from "../types";
+import type { TimelineItem, MusicItem, TitleItem, VolumeKeypoint } from "../types";
 
 export const FPS = 30;
 
@@ -23,11 +23,16 @@ export interface MusicAction extends TimelineAction {
   assetName: string;
 }
 
+export interface TitleAction extends TimelineAction {
+  titleText: string;
+  titleId: number;
+}
+
 /**
  * Convert backend TimelineItem[] and MusicItem[] into react-timeline-editor format.
  * Produces a video track and optionally a music track.
  */
-export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[]): {
+export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[], titleItems?: TitleItem[]): {
   rows: TimelineRow[];
   actions: VideoAction[];
   totalDuration: number;
@@ -60,10 +65,22 @@ export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[]): {
     assetName: mi.asset_name,
   }));
 
+  const titleActions: TitleAction[] = (titleItems || []).map((ti) => ({
+    id: `title-${ti.id}`,
+    start: ti.start_time,
+    end: ti.end_time,
+    effectId: "title",
+    titleText: ti.text,
+    titleId: ti.id,
+  }));
+
   const rows: TimelineRow[] = [
     { id: "video-track", actions },
     ...(musicActions.length > 0
       ? [{ id: "music-track", actions: musicActions }]
+      : []),
+    ...(titleActions.length > 0
+      ? [{ id: "title-track", actions: titleActions }]
       : []),
   ];
 

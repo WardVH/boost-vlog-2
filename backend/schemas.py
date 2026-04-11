@@ -158,3 +158,23 @@ class VolumeKeypoint(BaseModel):
 class MusicAutoResponse(BaseModel):
     items: list[MusicItemResponse]
     volume_envelope: list[VolumeKeypoint]
+
+
+class TitleItemResponse(BaseModel):
+    id: int
+    text: str
+    start_time: float
+    end_time: float
+
+    class Config:
+        from_attributes = True
+
+
+class TitleItemUpdate(BaseModel):
+    text: str | None = None
+    start_time: float | None = None
+    end_time: float | None = None
+
+
+class TitleAutoResponse(BaseModel):
+    items: list[TitleItemResponse]

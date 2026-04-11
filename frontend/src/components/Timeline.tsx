@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Timeline as TimelineEditor, type TimelineState } from "@xzdarcy/react-timeline-editor";
 import "@xzdarcy/react-timeline-editor/dist/react-timeline-editor.css";
 import { useTimelineStore } from "../stores/timelineStore";
-import { toEditorData, timelineSecondsToFrame, type VideoAction, type MusicAction } from "../lib/remotion";
+import { toEditorData, timelineSecondsToFrame, type VideoAction, type MusicAction, type TitleAction } from "../lib/remotion";
 
 const effects = {
   video: {
@@ -13,6 +13,10 @@ const effects = {
     id: "music",
     name: "Music",
   },
+  title: {
+    id: "title",
+    name: "Title",
+  },
 };
 
 const SCALE = 5; // seconds per tick
@@ -21,16 +25,23 @@ const MAX_SCALE_WIDTH = 500;
 const DEFAULT_SCALE_WIDTH = 160;
 
 export function Timeline() {
-  const { project, timelineItems, musicItems, playerRef, setMusicItems, setVolumeEnvelope, musicLoading, setMusicLoading } = useTimelineStore();
+  const {
+    project, timelineItems, musicItems, playerRef,
+    setMusicItems, setVolumeEnvelope, musicLoading, setMusicLoading,
+    titleItems, setTitleItems, titleLoading, setTitleLoading, updateTitleItem,
+  } = useTimelineStore();
   const timelineRef = useRef<TimelineState>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const syncingFromPlayer = useRef(false);
   const [scaleWidth, setScaleWidth] = useState(DEFAULT_SCALE_WIDTH);
   const [autoFit, setAutoFit] = useState(true);
 
+  const [editingTitleId, setEditingTitleId] = useState<number | null>(null);
+  const [editingTitleText, setEditingTitleText] = useState("");
+
   const { rows, totalDuration } = useMemo(
-    () => toEditorData(timelineItems, musicItems),
-    [timelineItems, musicItems]
+    () => toEditorData(timelineItems, musicItems, titleItems),
+    [timelineItems, musicItems, titleItems]
   );
 
   // Auto-fit: calculate scaleWidth so all clips fit in the container
@@ -128,6 +139,37 @@ export function Timeline() {
     setVolumeEnvelope([]);
   };
 
+  const handleAddTitles = async () => {
+    if (!project) return;
+    setTitleLoading(true);
+    try {
+      const res = await fetch(`/api/titles/${project.id}/auto`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setTitleItems(data.items);
+      }
+    } finally {
+      setTitleLoading(false);
+    }
+  };
+
+  const handleClearTitles = async () => {
+    if (!project) return;
+    await fetch(`/api/titles/${project.id}`, { method: "DELETE" });
+    setTitleItems([]);
+  };
+
+  const handleSaveTitle = async (titleId: number, text: string) => {
+    if (!project) return;
+    updateTitleItem(titleId, { text });
+    setEditingTitleId(null);
+    await fetch(`/api/titles/${project.id}/items/${titleId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+  };
+
   if (!project) return null;
 
   return (
@@ -172,6 +214,25 @@ export function Timeline() {
               </>
             )}
           </div>
+          <div className="title-controls">
+            <button
+              className="btn btn-sm"
+              onClick={handleAddTitles}
+              disabled={titleLoading || timelineItems.length === 0}
+            >
+              {titleLoading ? "Adding..." : "Add Titles"}
+            </button>
+            {titleItems.length > 0 && (
+              <>
+                <button className="btn btn-sm btn-ghost" onClick={handleClearTitles}>
+                  Clear Titles
+                </button>
+                <span className="title-info">
+                  {titleItems.length} title{titleItems.length !== 1 ? "s" : ""}
+                </span>
+              </>
+            )}
+          </div>
         </div>
       </div>
       {rows[0]?.actions.length === 0 ? (
@@ -192,6 +253,38 @@ export function Timeline() {
             onCursorDrag={handleCursorDrag}
             onClickTimeArea={handleClickTimeArea}
             getActionRender={(action) => {
+              if (action.effectId === "title") {
+                const t = action as unknown as TitleAction;
+                if (editingTitleId === t.titleId) {
+                  return (
+                    <div className="tl-action-render title editing">
+                      <input
+                        className="title-edit-input"
+                        autoFocus
+                        value={editingTitleText}
+                        onChange={(e) => setEditingTitleText(e.target.value)}
+                        onBlur={() => handleSaveTitle(t.titleId, editingTitleText)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveTitle(t.titleId, editingTitleText);
+                          if (e.key === "Escape") setEditingTitleId(null);
+                        }}
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    className="tl-action-render title"
+                    title="Double-click to edit"
+                    onDoubleClick={() => {
+                      setEditingTitleId(t.titleId);
+                      setEditingTitleText(t.titleText);
+                    }}
+                  >
+                    <span className="tl-action-label">{t.titleText}</span>
+                  </div>
+                );
+              }
               if (action.effectId === "music") {
                 const m = action as MusicAction;
                 return (

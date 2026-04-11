@@ -5,6 +5,7 @@ import { useTimelineStore } from "../stores/timelineStore";
 import type { TimelineItem } from "../types";
 
 const PREMOUNT_FRAMES = 30;
+const BROLL_AUDIO_VOLUME = 0.15;
 
 interface Props {
   items: TimelineItem[];
@@ -18,6 +19,8 @@ interface ClipLayout {
 
 export const TimelineComposition: React.FC<Props> = React.memo(({ items }) => {
   const frame = useCurrentFrame();
+  const musicItems = useTimelineStore((s) => s.musicItems);
+  const hasMusic = musicItems.length > 0;
 
   const layout = useMemo(() => {
     let cursor = 0;
@@ -67,15 +70,72 @@ export const TimelineComposition: React.FC<Props> = React.memo(({ items }) => {
                 startFrom={videoStartFrame}
                 endAt={videoStartFrame + clip.durationInFrames}
                 pauseWhenBuffering
+                volume={hasMusic && clip.item.clip_type === "broll" ? BROLL_AUDIO_VOLUME : 1}
                 style={{ width: "100%", height: "100%", objectFit: "contain" }}
               />
             </AbsoluteFill>
           </Sequence>
         );
       })}
+      <TitleLayer />
     </AbsoluteFill>
   );
 });
+
+const TitleOverlay: React.FC<{ text: string }> = ({ text }) => {
+  const frame = useCurrentFrame();
+  const opacity = Math.min(frame / 10, 1);
+
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: "flex-end",
+        alignItems: "center",
+        paddingBottom: "8%",
+      }}
+    >
+      <div
+        style={{
+          color: "white",
+          fontSize: 72,
+          fontFamily: "'Inter', sans-serif",
+          fontWeight: 800,
+          letterSpacing: "-0.04em",
+          textShadow: "0 0 20px rgba(0,0,0,0.9), 0 0 40px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.8)",
+          opacity,
+          textAlign: "center",
+          padding: "12px 24px",
+        }}
+      >
+        {text}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const TitleLayer: React.FC = () => {
+  const titleItems = useTimelineStore((s) => s.titleItems);
+
+  return (
+    <>
+      {titleItems.map((ti) => {
+        const startFrame = secondsToFrames(ti.start_time);
+        const durationInFrames = secondsToFrames(ti.end_time - ti.start_time);
+        if (durationInFrames <= 0) return null;
+
+        return (
+          <Sequence
+            key={`title-${ti.id}`}
+            from={startFrame}
+            durationInFrames={durationInFrames}
+          >
+            <TitleOverlay text={ti.text} />
+          </Sequence>
+        );
+      })}
+    </>
+  );
+};
 
 const MusicLayer: React.FC = () => {
   const musicItems = useTimelineStore((s) => s.musicItems);

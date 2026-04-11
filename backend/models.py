@@ -47,6 +47,7 @@ class Project(Base):
     clips = relationship("Clip", back_populates="project", cascade="all, delete-orphan")
     timeline_items = relationship("TimelineItem", back_populates="project", cascade="all, delete-orphan")
     music_items = relationship("MusicItem", back_populates="project", cascade="all, delete-orphan")
+    title_items = relationship("TitleItem", back_populates="project", cascade="all, delete-orphan")
 
 
 class Clip(Base):
@@ -118,6 +119,18 @@ class MusicItem(Base):
 
     project = relationship("Project", back_populates="music_items")
     asset = relationship("Asset")
+
+
+class TitleItem(Base):
+    __tablename__ = "title_items"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    text = Column(String, nullable=False)
+    start_time = Column(Float, nullable=False)
+    end_time = Column(Float, nullable=False)
+
+    project = relationship("Project", back_populates="title_items")
 
 
 class YouTubeCredential(Base):

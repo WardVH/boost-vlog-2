@@ -68,6 +68,13 @@ export interface MusicItem {
   volume: number;
 }
 
+export interface TitleItem {
+  id: number
+  text: string
+  start_time: number
+  end_time: number
+}
+
 export interface VolumeKeypoint {
   t: number;
   v: number;
