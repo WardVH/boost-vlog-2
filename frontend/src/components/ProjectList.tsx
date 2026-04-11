@@ -19,6 +19,8 @@ export function ProjectList() {
     setRenderProgress, setYoutubeUploadProgress, setYoutubeUploadResult, setYoutubeUploadError,
     setMusicItems, setVolumeEnvelope,
     setTitleItems,
+    setCaptionItems,
+    setTimestampItems,
   } = useTimelineStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +83,18 @@ export function ProjectList() {
       .then((data) => {
         if (data) setTitleItems(data.items || []);
       });
+    // Load caption items
+    fetch(`/api/captions/${id}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data) setCaptionItems(data.items || []);
+      });
+    // Load timestamp items
+    fetch(`/api/timestamps/${id}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data) setTimestampItems(data.items || []);
+      });
     setIsWatching(true);
     // Start watching in background — new clips arrive via websocket
     setScanningFiles(true);
@@ -134,6 +148,8 @@ export function ProjectList() {
       setYoutubeUploadResult(null);
       setYoutubeUploadError(null);
       setTitleItems([]);
+      setCaptionItems([]);
+      setTimestampItems([]);
       // Navigate immediately — don't wait for scan
       setProject(proj);
       setClips([]);

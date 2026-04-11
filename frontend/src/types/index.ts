@@ -75,6 +75,20 @@ export interface TitleItem {
   end_time: number
 }
 
+export interface CaptionItem {
+  id: number
+  text: string
+  start_time: number
+  end_time: number
+}
+
+export interface TimestampItem {
+  id: number
+  text: string
+  start_time: number
+  end_time: number
+}
+
 export interface VolumeKeypoint {
   t: number;
   v: number;

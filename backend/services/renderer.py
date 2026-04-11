@@ -8,11 +8,13 @@ logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 from database import SessionLocal
 import shutil
-from models import TimelineItem, MusicItem, Asset, TitleItem
+from models import TimelineItem, MusicItem, Asset, TitleItem, CaptionItem, TimestampItem
 from routes.ws import broadcast
 from config import BROLL_AUDIO_VOLUME
 from services.ducker import compute_volume_envelope, envelope_to_ffmpeg_expr
+from services.sfx_generator import ensure_title_sfx
 from routes.music import _build_timeline_segments
+from config import TITLE_SFX_VOLUME
 
 _OUT_TIME_RE = re.compile(r"out_time_us=(\d+)")
 
@@ -214,8 +216,32 @@ async def render_timeline(project_id: int, output_path: str) -> str:
             .all()
         )
         if title_items:
-            await broadcast(project_id, "render_progress", {"percent": 96, "stage": "burning titles"})
+            await broadcast(project_id, "render_progress", {"percent": 91, "stage": "burning titles"})
             await _burn_titles(title_items, output_path)
+            await broadcast(project_id, "render_progress", {"percent": 93, "stage": "mixing title sfx"})
+            await _mix_title_sfx(title_items, output_path)
+
+        # Burn timestamp overlays
+        timestamp_items = (
+            db.query(TimestampItem)
+            .filter(TimestampItem.project_id == project_id)
+            .order_by(TimestampItem.start_time)
+            .all()
+        )
+        if timestamp_items:
+            await broadcast(project_id, "render_progress", {"percent": 95, "stage": "burning timestamps"})
+            await _burn_timestamps(timestamp_items, output_path)
+
+        # Burn caption overlays
+        caption_items = (
+            db.query(CaptionItem)
+            .filter(CaptionItem.project_id == project_id)
+            .order_by(CaptionItem.start_time)
+            .all()
+        )
+        if caption_items:
+            await broadcast(project_id, "render_progress", {"percent": 97, "stage": "burning captions"})
+            await _burn_captions(caption_items, output_path)
 
         await broadcast(project_id, "render_progress", {"percent": 100, "stage": "done"})
         await broadcast(project_id, "render_done", {"output_path": output_path})
@@ -365,3 +391,152 @@ async def _burn_titles(
             raise RuntimeError(f"Title burn failed: {stderr.decode()[-500:]}")
 
         shutil.move(titled_path, video_path)
+
+
+async def _mix_title_sfx(
+    title_items: list[TitleItem],
+    video_path: str,
+) -> None:
+    """Mix subtle in/out sound effects at each title's start and end time."""
+    sfx_in_path, sfx_out_path = await ensure_title_sfx()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        inputs = ["-i", video_path, "-i", sfx_in_path, "-i", sfx_out_path]
+
+        filter_parts = []
+        sfx_labels = []
+
+        for i, ti in enumerate(title_items):
+            in_delay_ms = int(ti.start_time * 1000)
+            label_in = f"sfx_in{i}"
+            filter_parts.append(
+                f"[1:a]acopy,adelay={in_delay_ms}|{in_delay_ms},volume={TITLE_SFX_VOLUME}[{label_in}]"
+            )
+            sfx_labels.append(f"[{label_in}]")
+
+            out_delay_ms = int(ti.end_time * 1000)
+            label_out = f"sfx_out{i}"
+            filter_parts.append(
+                f"[2:a]acopy,adelay={out_delay_ms}|{out_delay_ms},volume={TITLE_SFX_VOLUME}[{label_out}]"
+            )
+            sfx_labels.append(f"[{label_out}]")
+
+        n_sfx = len(sfx_labels)
+        sfx_mix_input = "".join(sfx_labels)
+        filter_parts.append(
+            f"{sfx_mix_input}amix=inputs={n_sfx}:duration=longest:dropout_transition=0[sfx_mixed]"
+        )
+        filter_parts.append(
+            f"[0:a][sfx_mixed]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+        )
+
+        filter_complex = ";".join(filter_parts)
+        mixed_path = str(Path(tmpdir) / "sfx_mixed.mp4")
+
+        cmd = [
+            "ffmpeg", "-y",
+            *inputs,
+            "-filter_complex", filter_complex,
+            "-map", "0:v", "-map", "[aout]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            mixed_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Title SFX mixing failed: {stderr.decode()[-500:]}")
+
+        shutil.move(mixed_path, video_path)
+
+
+async def _burn_timestamps(
+    timestamp_items: list[TimestampItem],
+    video_path: str,
+) -> None:
+    """Burn timestamp overlays into the video — smaller text, top-left position."""
+    font_path = _find_inter_font()
+    font_arg = f":fontfile='{font_path}'" if font_path else ""
+
+    drawtext_parts = []
+    for ti in timestamp_items:
+        escaped = ti.text.replace("'", "'\\''").replace(":", "\\:").replace(",", "\\,")
+        dt = (
+            f"drawtext=text='{escaped}'"
+            f"{font_arg}"
+            f":fontsize=42"
+            f":fontcolor=white"
+            f":shadowcolor=black@0.8:shadowx=3:shadowy=3"
+            f":borderw=3:bordercolor=black@0.5"
+            f":x=60"
+            f":y=60"
+            f":enable='between(t,{ti.start_time},{ti.end_time})'"
+        )
+        drawtext_parts.append(dt)
+
+    filter_str = ",".join(drawtext_parts)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        stamped_path = str(Path(tmpdir) / "stamped.mp4")
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-vf", filter_str,
+            "-c:v", "h264_videotoolbox", "-q:v", "65",
+            "-c:a", "copy",
+            stamped_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Timestamp burn failed: {stderr.decode()[-500:]}")
+
+        shutil.move(stamped_path, video_path)
+
+
+async def _burn_captions(
+    caption_items: list[CaptionItem],
+    video_path: str,
+) -> None:
+    """Burn caption subtitles into the video — smaller text with background box."""
+    font_path = _find_inter_font()
+    font_arg = f":fontfile='{font_path}'" if font_path else ""
+
+    drawtext_parts = []
+    for ci in caption_items:
+        escaped = ci.text.replace("'", "'\\''").replace(":", "\\:").replace(",", "\\,")
+        dt = (
+            f"drawtext=text='{escaped}'"
+            f"{font_arg}"
+            f":fontsize=42"
+            f":fontcolor=white"
+            f":box=1:boxcolor=black@0.6:boxborderw=12"
+            f":x=(w-text_w)/2"
+            f":y=h*0.90-text_h/2"
+            f":enable='between(t,{ci.start_time},{ci.end_time})'"
+        )
+        drawtext_parts.append(dt)
+
+    filter_str = ",".join(drawtext_parts)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        captioned_path = str(Path(tmpdir) / "captioned.mp4")
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-vf", filter_str,
+            "-c:v", "h264_videotoolbox", "-q:v", "65",
+            "-c:a", "copy",
+            captioned_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"Caption burn failed: {stderr.decode()[-500:]}")
+
+        shutil.move(captioned_path, video_path)

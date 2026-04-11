@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { RefObject } from "react";
 import type { PlayerRef } from "@remotion/player";
-import type { Project, Clip, TimelineItem, Asset, MusicItem, TitleItem, VolumeKeypoint } from "../types";
+import type { Project, Clip, TimelineItem, Asset, MusicItem, TitleItem, CaptionItem, TimestampItem, VolumeKeypoint } from "../types";
 
 interface TimelineStore {
   project: Project | null;
@@ -65,6 +65,20 @@ interface TimelineStore {
   setTitleItems: (items: TitleItem[]) => void;
   setTitleLoading: (loading: boolean) => void;
   updateTitleItem: (id: number, updates: Partial<TitleItem>) => void;
+
+  // Caption overlays
+  captionItems: CaptionItem[];
+  captionLoading: boolean;
+  setCaptionItems: (items: CaptionItem[]) => void;
+  setCaptionLoading: (loading: boolean) => void;
+  updateCaptionItem: (id: number, updates: Partial<CaptionItem>) => void;
+
+  // Timestamp overlays
+  timestampItems: TimestampItem[];
+  timestampLoading: boolean;
+  setTimestampItems: (items: TimestampItem[]) => void;
+  setTimestampLoading: (loading: boolean) => void;
+  updateTimestampItem: (id: number, updates: Partial<TimestampItem>) => void;
 
   // Auto-save status
   saveStatus: "idle" | "saving" | "saved";
@@ -161,6 +175,28 @@ export const useTimelineStore = create<TimelineStore>((set) => ({
   updateTitleItem: (id, updates) =>
     set((state) => ({
       titleItems: state.titleItems.map((t) =>
+        t.id === id ? { ...t, ...updates } : t
+      ),
+    })),
+
+  captionItems: [],
+  captionLoading: false,
+  setCaptionItems: (captionItems) => set({ captionItems }),
+  setCaptionLoading: (captionLoading) => set({ captionLoading }),
+  updateCaptionItem: (id, updates) =>
+    set((state) => ({
+      captionItems: state.captionItems.map((c) =>
+        c.id === id ? { ...c, ...updates } : c
+      ),
+    })),
+
+  timestampItems: [],
+  timestampLoading: false,
+  setTimestampItems: (timestampItems) => set({ timestampItems }),
+  setTimestampLoading: (timestampLoading) => set({ timestampLoading }),
+  updateTimestampItem: (id, updates) =>
+    set((state) => ({
+      timestampItems: state.timestampItems.map((t) =>
         t.id === id ? { ...t, ...updates } : t
       ),
     })),

@@ -1,5 +1,5 @@
 import type { TimelineRow, TimelineAction } from "@xzdarcy/react-timeline-editor";
-import type { TimelineItem, MusicItem, TitleItem, VolumeKeypoint } from "../types";
+import type { TimelineItem, MusicItem, TitleItem, CaptionItem, TimestampItem, VolumeKeypoint } from "../types";
 
 export const FPS = 30;
 
@@ -28,11 +28,21 @@ export interface TitleAction extends TimelineAction {
   titleId: number;
 }
 
+export interface CaptionAction extends TimelineAction {
+  captionText: string;
+  captionId: number;
+}
+
+export interface TimestampAction extends TimelineAction {
+  timestampText: string;
+  timestampId: number;
+}
+
 /**
  * Convert backend TimelineItem[] and MusicItem[] into react-timeline-editor format.
  * Produces a video track and optionally a music track.
  */
-export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[], titleItems?: TitleItem[]): {
+export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[], titleItems?: TitleItem[], captionItems?: CaptionItem[], timestampItems?: TimestampItem[]): {
   rows: TimelineRow[];
   actions: VideoAction[];
   totalDuration: number;
@@ -74,6 +84,24 @@ export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[], ti
     titleId: ti.id,
   }));
 
+  const captionActions: CaptionAction[] = (captionItems || []).map((ci) => ({
+    id: `caption-${ci.id}`,
+    start: ci.start_time,
+    end: ci.end_time,
+    effectId: "caption",
+    captionText: ci.text,
+    captionId: ci.id,
+  }));
+
+  const timestampActions: TimestampAction[] = (timestampItems || []).map((ts) => ({
+    id: `timestamp-${ts.id}`,
+    start: ts.start_time,
+    end: ts.end_time,
+    effectId: "timestamp",
+    timestampText: ts.text,
+    timestampId: ts.id,
+  }));
+
   const rows: TimelineRow[] = [
     { id: "video-track", actions },
     ...(musicActions.length > 0
@@ -81,6 +109,12 @@ export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[], ti
       : []),
     ...(titleActions.length > 0
       ? [{ id: "title-track", actions: titleActions }]
+      : []),
+    ...(captionActions.length > 0
+      ? [{ id: "caption-track", actions: captionActions }]
+      : []),
+    ...(timestampActions.length > 0
+      ? [{ id: "timestamp-track", actions: timestampActions }]
       : []),
   ];
 

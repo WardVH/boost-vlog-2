@@ -78,6 +78,8 @@ export const TimelineComposition: React.FC<Props> = React.memo(({ items }) => {
         );
       })}
       <TitleLayer />
+      <CaptionLayer />
+      <TimestampLayer />
     </AbsoluteFill>
   );
 });
@@ -113,6 +115,9 @@ const TitleOverlay: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
+const TITLE_SFX_VOLUME = 0.5;
+const TITLE_SFX_DURATION_FRAMES = Math.round(0.15 * FPS); // ~5 frames
+
 const TitleLayer: React.FC = () => {
   const titleItems = useTimelineStore((s) => s.titleItems);
 
@@ -123,13 +128,132 @@ const TitleLayer: React.FC = () => {
         const durationInFrames = secondsToFrames(ti.end_time - ti.start_time);
         if (durationInFrames <= 0) return null;
 
+        const endFrame = startFrame + durationInFrames;
+
+        return (
+          <React.Fragment key={`title-${ti.id}`}>
+            <Sequence from={startFrame} durationInFrames={durationInFrames}>
+              <TitleOverlay text={ti.text} />
+            </Sequence>
+            {/* Title in SFX */}
+            <Sequence from={startFrame} durationInFrames={TITLE_SFX_DURATION_FRAMES}>
+              <Audio src="/api/sfx/title-in" volume={TITLE_SFX_VOLUME} />
+            </Sequence>
+            {/* Title out SFX */}
+            <Sequence from={endFrame} durationInFrames={TITLE_SFX_DURATION_FRAMES}>
+              <Audio src="/api/sfx/title-out" volume={TITLE_SFX_VOLUME} />
+            </Sequence>
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
+};
+
+const CaptionOverlay: React.FC<{ text: string }> = ({ text }) => {
+  const frame = useCurrentFrame();
+  const opacity = Math.min(frame / 5, 1);
+
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: "flex-end",
+        alignItems: "center",
+        paddingBottom: "3%",
+      }}
+    >
+      <div
+        style={{
+          color: "white",
+          fontSize: 36,
+          fontFamily: "'Inter', sans-serif",
+          fontWeight: 600,
+          backgroundColor: "rgba(0, 0, 0, 0.6)",
+          padding: "8px 20px",
+          borderRadius: 6,
+          opacity,
+          textAlign: "center",
+          maxWidth: "80%",
+        }}
+      >
+        {text}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const CaptionLayer: React.FC = () => {
+  const captionItems = useTimelineStore((s) => s.captionItems);
+
+  return (
+    <>
+      {captionItems.map((ci) => {
+        const startFrame = secondsToFrames(ci.start_time);
+        const durationInFrames = secondsToFrames(ci.end_time - ci.start_time);
+        if (durationInFrames <= 0) return null;
+
         return (
           <Sequence
-            key={`title-${ti.id}`}
+            key={`caption-${ci.id}`}
             from={startFrame}
             durationInFrames={durationInFrames}
           >
-            <TitleOverlay text={ti.text} />
+            <CaptionOverlay text={ci.text} />
+          </Sequence>
+        );
+      })}
+    </>
+  );
+};
+
+const TimestampOverlay: React.FC<{ text: string }> = ({ text }) => {
+  const frame = useCurrentFrame();
+  const opacity = Math.min(frame / 10, 1);
+
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: "flex-start",
+        alignItems: "flex-start",
+        padding: "4% 4%",
+      }}
+    >
+      <div
+        style={{
+          color: "white",
+          fontSize: 36,
+          fontFamily: "'Inter', sans-serif",
+          fontWeight: 600,
+          backgroundColor: "rgba(0, 0, 0, 0.5)",
+          padding: "8px 18px",
+          borderRadius: 8,
+          opacity,
+          letterSpacing: "0.02em",
+        }}
+      >
+        {text}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const TimestampLayer: React.FC = () => {
+  const timestampItems = useTimelineStore((s) => s.timestampItems);
+
+  return (
+    <>
+      {timestampItems.map((ts) => {
+        const startFrame = secondsToFrames(ts.start_time);
+        const durationInFrames = secondsToFrames(ts.end_time - ts.start_time);
+        if (durationInFrames <= 0) return null;
+
+        return (
+          <Sequence
+            key={`timestamp-${ts.id}`}
+            from={startFrame}
+            durationInFrames={durationInFrames}
+          >
+            <TimestampOverlay text={ts.text} />
           </Sequence>
         );
       })}

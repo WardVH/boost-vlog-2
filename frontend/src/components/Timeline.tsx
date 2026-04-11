@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Timeline as TimelineEditor, type TimelineState } from "@xzdarcy/react-timeline-editor";
 import "@xzdarcy/react-timeline-editor/dist/react-timeline-editor.css";
 import { useTimelineStore } from "../stores/timelineStore";
-import { toEditorData, timelineSecondsToFrame, type VideoAction, type MusicAction, type TitleAction } from "../lib/remotion";
+import { toEditorData, timelineSecondsToFrame, type VideoAction, type MusicAction, type TitleAction, type CaptionAction, type TimestampAction } from "../lib/remotion";
 
 const effects = {
   video: {
@@ -17,6 +17,14 @@ const effects = {
     id: "title",
     name: "Title",
   },
+  caption: {
+    id: "caption",
+    name: "Caption",
+  },
+  timestamp: {
+    id: "timestamp",
+    name: "Timestamp",
+  },
 };
 
 const SCALE = 5; // seconds per tick
@@ -29,6 +37,8 @@ export function Timeline() {
     project, timelineItems, musicItems, playerRef,
     setMusicItems, setVolumeEnvelope, musicLoading, setMusicLoading,
     titleItems, setTitleItems, titleLoading, setTitleLoading, updateTitleItem,
+    captionItems, setCaptionItems, captionLoading, setCaptionLoading, updateCaptionItem,
+    timestampItems, setTimestampItems, timestampLoading, setTimestampLoading, updateTimestampItem,
   } = useTimelineStore();
   const timelineRef = useRef<TimelineState>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -38,10 +48,14 @@ export function Timeline() {
 
   const [editingTitleId, setEditingTitleId] = useState<number | null>(null);
   const [editingTitleText, setEditingTitleText] = useState("");
+  const [editingCaptionId, setEditingCaptionId] = useState<number | null>(null);
+  const [editingCaptionText, setEditingCaptionText] = useState("");
+  const [editingTimestampId, setEditingTimestampId] = useState<number | null>(null);
+  const [editingTimestampText, setEditingTimestampText] = useState("");
 
   const { rows, totalDuration } = useMemo(
-    () => toEditorData(timelineItems, musicItems, titleItems),
-    [timelineItems, musicItems, titleItems]
+    () => toEditorData(timelineItems, musicItems, titleItems, captionItems, timestampItems),
+    [timelineItems, musicItems, titleItems, captionItems, timestampItems]
   );
 
   // Auto-fit: calculate scaleWidth so all clips fit in the container
@@ -170,6 +184,68 @@ export function Timeline() {
     });
   };
 
+  const handleAddCaptions = async () => {
+    if (!project) return;
+    setCaptionLoading(true);
+    try {
+      const res = await fetch(`/api/captions/${project.id}/auto`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setCaptionItems(data.items);
+      }
+    } finally {
+      setCaptionLoading(false);
+    }
+  };
+
+  const handleClearCaptions = async () => {
+    if (!project) return;
+    await fetch(`/api/captions/${project.id}`, { method: "DELETE" });
+    setCaptionItems([]);
+  };
+
+  const handleSaveCaption = async (captionId: number, text: string) => {
+    if (!project) return;
+    updateCaptionItem(captionId, { text });
+    setEditingCaptionId(null);
+    await fetch(`/api/captions/${project.id}/items/${captionId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+  };
+
+  const handleAddTimestamps = async () => {
+    if (!project) return;
+    setTimestampLoading(true);
+    try {
+      const res = await fetch(`/api/timestamps/${project.id}/auto`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setTimestampItems(data.items);
+      }
+    } finally {
+      setTimestampLoading(false);
+    }
+  };
+
+  const handleClearTimestamps = async () => {
+    if (!project) return;
+    await fetch(`/api/timestamps/${project.id}`, { method: "DELETE" });
+    setTimestampItems([]);
+  };
+
+  const handleSaveTimestamp = async (timestampId: number, text: string) => {
+    if (!project) return;
+    updateTimestampItem(timestampId, { text });
+    setEditingTimestampId(null);
+    await fetch(`/api/timestamps/${project.id}/items/${timestampId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+  };
+
   if (!project) return null;
 
   return (
@@ -233,6 +309,44 @@ export function Timeline() {
               </>
             )}
           </div>
+          <div className="caption-controls">
+            <button
+              className="btn btn-sm"
+              onClick={handleAddCaptions}
+              disabled={captionLoading || timelineItems.length === 0}
+            >
+              {captionLoading ? "Adding..." : "Add Captions"}
+            </button>
+            {captionItems.length > 0 && (
+              <>
+                <button className="btn btn-sm btn-ghost" onClick={handleClearCaptions}>
+                  Clear Captions
+                </button>
+                <span className="caption-info">
+                  {captionItems.length} caption{captionItems.length !== 1 ? "s" : ""}
+                </span>
+              </>
+            )}
+          </div>
+          <div className="timestamp-controls">
+            <button
+              className="btn btn-sm"
+              onClick={handleAddTimestamps}
+              disabled={timestampLoading || timelineItems.length === 0}
+            >
+              {timestampLoading ? "Adding..." : "Add Timestamps"}
+            </button>
+            {timestampItems.length > 0 && (
+              <>
+                <button className="btn btn-sm btn-ghost" onClick={handleClearTimestamps}>
+                  Clear Timestamps
+                </button>
+                <span className="timestamp-info">
+                  {timestampItems.length} timestamp{timestampItems.length !== 1 ? "s" : ""}
+                </span>
+              </>
+            )}
+          </div>
         </div>
       </div>
       {rows[0]?.actions.length === 0 ? (
@@ -282,6 +396,70 @@ export function Timeline() {
                     }}
                   >
                     <span className="tl-action-label">{t.titleText}</span>
+                  </div>
+                );
+              }
+              if (action.effectId === "caption") {
+                const c = action as unknown as CaptionAction;
+                if (editingCaptionId === c.captionId) {
+                  return (
+                    <div className="tl-action-render caption editing">
+                      <input
+                        className="caption-edit-input"
+                        autoFocus
+                        value={editingCaptionText}
+                        onChange={(e) => setEditingCaptionText(e.target.value)}
+                        onBlur={() => handleSaveCaption(c.captionId, editingCaptionText)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveCaption(c.captionId, editingCaptionText);
+                          if (e.key === "Escape") setEditingCaptionId(null);
+                        }}
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    className="tl-action-render caption"
+                    title="Double-click to edit"
+                    onDoubleClick={() => {
+                      setEditingCaptionId(c.captionId);
+                      setEditingCaptionText(c.captionText);
+                    }}
+                  >
+                    <span className="tl-action-label">{c.captionText}</span>
+                  </div>
+                );
+              }
+              if (action.effectId === "timestamp") {
+                const ts = action as unknown as TimestampAction;
+                if (editingTimestampId === ts.timestampId) {
+                  return (
+                    <div className="tl-action-render timestamp editing">
+                      <input
+                        className="timestamp-edit-input"
+                        autoFocus
+                        value={editingTimestampText}
+                        onChange={(e) => setEditingTimestampText(e.target.value)}
+                        onBlur={() => handleSaveTimestamp(ts.timestampId, editingTimestampText)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveTimestamp(ts.timestampId, editingTimestampText);
+                          if (e.key === "Escape") setEditingTimestampId(null);
+                        }}
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    className="tl-action-render timestamp"
+                    title="Double-click to edit"
+                    onDoubleClick={() => {
+                      setEditingTimestampId(ts.timestampId);
+                      setEditingTimestampText(ts.timestampText);
+                    }}
+                  >
+                    <span className="tl-action-label">{ts.timestampText}</span>
                   </div>
                 );
               }

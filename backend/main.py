@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from database import engine, Base
-from routes import projects, clips, timeline, render, ws, filesystem, generate, youtube, assets, music, titles
+from routes import projects, clips, timeline, render, ws, filesystem, generate, youtube, assets, music, titles, captions, timestamps, sfx
 from workers.queue import processing_queue, process_worker
 from services.watcher import set_queue
 from config import PROCESSED_DIR, DATA_DIR, ASSETS_DIR
@@ -82,3 +82,6 @@ app.include_router(youtube.router, prefix="/api/youtube", tags=["youtube"])
 app.include_router(assets.router, prefix="/api/assets", tags=["assets"])
 app.include_router(music.router, prefix="/api/music", tags=["music"])
 app.include_router(titles.router, prefix="/api/titles", tags=["titles"])
+app.include_router(captions.router, prefix="/api/captions", tags=["captions"])
+app.include_router(timestamps.router, prefix="/api/timestamps", tags=["timestamps"])
+app.include_router(sfx.router, prefix="/api/sfx", tags=["sfx"])

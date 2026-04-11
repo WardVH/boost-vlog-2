@@ -178,3 +178,43 @@ class TitleItemUpdate(BaseModel):
 
 class TitleAutoResponse(BaseModel):
     items: list[TitleItemResponse]
+
+
+class CaptionItemResponse(BaseModel):
+    id: int
+    text: str
+    start_time: float
+    end_time: float
+
+    class Config:
+        from_attributes = True
+
+
+class CaptionItemUpdate(BaseModel):
+    text: str | None = None
+    start_time: float | None = None
+    end_time: float | None = None
+
+
+class CaptionAutoResponse(BaseModel):
+    items: list[CaptionItemResponse]
+
+
+class TimestampItemResponse(BaseModel):
+    id: int
+    text: str
+    start_time: float
+    end_time: float
+
+    class Config:
+        from_attributes = True
+
+
+class TimestampItemUpdate(BaseModel):
+    text: str | None = None
+    start_time: float | None = None
+    end_time: float | None = None
+
+
+class TimestampAutoResponse(BaseModel):
+    items: list[TimestampItemResponse]

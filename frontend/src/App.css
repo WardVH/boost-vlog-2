@@ -1388,3 +1388,93 @@ input[type="text"]:focus {
   padding: 2px 6px;
   font-family: inherit;
 }
+
+/* ── Timestamp Track on Timeline ── */
+
+.caption-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.caption-info {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.tl-action-render.caption {
+  background: rgba(74, 222, 128, 0.2);
+  border: 1px solid rgba(74, 222, 128, 0.5);
+  border-radius: 4px;
+  padding: 2px 6px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: default;
+}
+
+.tl-action-render.caption .tl-action-label {
+  color: #4ade80;
+  font-size: 11px;
+}
+
+.tl-action-render.caption.editing {
+  padding: 0;
+}
+
+.caption-edit-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  font-size: 11px;
+  padding: 2px 6px;
+  font-family: inherit;
+}
+
+.timestamp-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timestamp-info {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.tl-action-render.timestamp {
+  background: rgba(251, 191, 36, 0.2);
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  border-radius: 4px;
+  padding: 2px 6px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: default;
+}
+
+.tl-action-render.timestamp .tl-action-label {
+  color: #fbbf24;
+  font-size: 11px;
+}
+
+.tl-action-render.timestamp.editing {
+  padding: 0;
+}
+
+.timestamp-edit-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  font-size: 11px;
+  padding: 2px 6px;
+  font-family: inherit;
+}

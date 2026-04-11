@@ -48,6 +48,8 @@ class Project(Base):
     timeline_items = relationship("TimelineItem", back_populates="project", cascade="all, delete-orphan")
     music_items = relationship("MusicItem", back_populates="project", cascade="all, delete-orphan")
     title_items = relationship("TitleItem", back_populates="project", cascade="all, delete-orphan")
+    caption_items = relationship("CaptionItem", back_populates="project", cascade="all, delete-orphan")
+    timestamp_items = relationship("TimestampItem", back_populates="project", cascade="all, delete-orphan")
 
 
 class Clip(Base):
@@ -131,6 +133,30 @@ class TitleItem(Base):
     end_time = Column(Float, nullable=False)
 
     project = relationship("Project", back_populates="title_items")
+
+
+class CaptionItem(Base):
+    __tablename__ = "caption_items"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    text = Column(String, nullable=False)
+    start_time = Column(Float, nullable=False)
+    end_time = Column(Float, nullable=False)
+
+    project = relationship("Project", back_populates="caption_items")
+
+
+class TimestampItem(Base):
+    __tablename__ = "timestamp_items"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    text = Column(String, nullable=False)
+    start_time = Column(Float, nullable=False)
+    end_time = Column(Float, nullable=False)
+
+    project = relationship("Project", back_populates="timestamp_items")
 
 
 class YouTubeCredential(Base):
