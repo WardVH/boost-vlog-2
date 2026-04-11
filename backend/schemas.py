@@ -37,9 +37,33 @@ class ProjectResponse(BaseModel):
     name: str
     watch_directory: str
     clips: list[ClipResponse]
+    selected_title: str | None = None
+    video_description: str | None = None
+    video_tags: str | None = None  # JSON string
+    video_category: str | None = "22"
+    video_visibility: str | None = "private"
+    selected_thumbnail_idx: int | None = None
+    desc_system_prompt: str | None = None
+    thumbnail_urls: str | None = None
+    locked_thumbnail_indices: str | None = None
+    thumbnail_text: str | None = None
+    render_path: str | None = None
 
     class Config:
         from_attributes = True
+
+
+class ProjectMetadataUpdate(BaseModel):
+    selected_title: str | None = None
+    video_description: str | None = None
+    video_tags: str | None = None
+    video_category: str | None = None
+    video_visibility: str | None = None
+    selected_thumbnail_idx: int | None = None
+    desc_system_prompt: str | None = None
+    thumbnail_urls: str | None = None
+    locked_thumbnail_indices: str | None = None
+    thumbnail_text: str | None = None
 
 
 class TimelineItemResponse(BaseModel):
@@ -66,3 +90,38 @@ class TimelineItemUpdate(BaseModel):
 
 class TimelineUpdate(BaseModel):
     items: list[TimelineItemUpdate]
+
+
+class TitleSuggestionsResponse(BaseModel):
+    titles: list[str]
+
+
+class ThumbnailRequest(BaseModel):
+    title: str
+    skip_indices: list[int] = []
+
+
+class ThumbnailResponse(BaseModel):
+    thumbnail_urls: list[str]
+
+
+class MetadataRequest(BaseModel):
+    title: str
+    system_prompt: str | None = None
+
+
+class YouTubeUploadRequest(BaseModel):
+    title: str
+    description: str = ""
+    tags: list[str] = []
+    category_id: str = "22"
+    privacy_status: str = "private"
+    thumbnail_index: int | None = None
+
+
+class DescriptionResponse(BaseModel):
+    description: str
+
+
+class TagsResponse(BaseModel):
+    tags: list[str]

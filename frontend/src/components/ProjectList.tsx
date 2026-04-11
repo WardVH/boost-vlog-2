@@ -2,8 +2,22 @@ import { useEffect, useState } from "react";
 import { useTimelineStore } from "../stores/timelineStore";
 import type { Project } from "../types";
 
+const DEFAULT_DESC_PROMPT =
+  "You are a YouTube description writer. Write a compelling video description " +
+  "based on the transcript and title provided. Include:\n" +
+  "- A hook/summary in the first 2 lines (this shows in search results)\n" +
+  "- Key topics covered\n" +
+  "- A call to action (like, subscribe, comment)\n\n" +
+  "Keep it under 300 words. Do not include timestamps or hashtags.";
+
 export function ProjectList() {
-  const { setProject, setClips, setTimelineItems, setIsWatching } = useTimelineStore();
+  const {
+    setProject, setClips, setTimelineItems, setIsWatching, setScanningFiles,
+    setSelectedTitle, setVideoDescription, setVideoTags,
+    setVideoCategory, setVideoVisibility, setSelectedThumbnailIndices, setDescSystemPrompt,
+    setThumbnailUrls, setThumbnailText,
+    setRenderProgress, setYoutubeUploadProgress, setYoutubeUploadResult, setYoutubeUploadError,
+  } = useTimelineStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -29,13 +43,34 @@ export function ProjectList() {
   const openProject = async (id: number) => {
     const fullRes = await fetch(`/api/projects/${id}`);
     const proj = await fullRes.json();
-    const watchRes = await fetch(`/api/projects/${id}/watch/start`, { method: "POST" });
-    const watchData = await watchRes.json();
+    // Restore saved metadata BEFORE setting project, so auto-save doesn't wipe it
+    setSelectedTitle(proj.selected_title || null);
+    setVideoDescription(proj.video_description || "");
+    setVideoTags(proj.video_tags ? JSON.parse(proj.video_tags) : []);
+    setVideoCategory(proj.video_category || "22");
+    setVideoVisibility(proj.video_visibility || "private");
+    setSelectedThumbnailIndices(proj.locked_thumbnail_indices ? JSON.parse(proj.locked_thumbnail_indices) : []);
+    setDescSystemPrompt(proj.desc_system_prompt || DEFAULT_DESC_PROMPT);
+    setThumbnailUrls(proj.thumbnail_urls ? JSON.parse(proj.thumbnail_urls) : []);
+    setThumbnailText(proj.thumbnail_text || proj.selected_title || "");
+    // Reset render/upload state (render_path on project object handles "Previously exported")
+    setRenderProgress(null);
+    setYoutubeUploadProgress(null);
+    setYoutubeUploadResult(null);
+    setYoutubeUploadError(null);
+
+    // Navigate immediately with existing clips
     setProject(proj);
-    setClips(watchData.clips || proj.clips || []);
+    setClips(proj.clips || []);
     const tlRes = await fetch(`/api/timeline/${id}`);
     if (tlRes.ok) setTimelineItems(await tlRes.json());
     setIsWatching(true);
+    // Start watching in background — new clips arrive via websocket
+    setScanningFiles(true);
+    fetch(`/api/projects/${id}/watch/start`, { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => { if (data.clips?.length) setClips(data.clips); })
+      .finally(() => setScanningFiles(false));
   };
 
   const browse = async () => {
@@ -66,12 +101,32 @@ export function ProjectList() {
         throw new Error(data.detail || "Failed to create project");
       }
       const proj = await res.json();
-      const watchRes = await fetch(`/api/projects/${proj.id}/watch/start`, { method: "POST" });
-      const watchData = await watchRes.json();
+      // Reset metadata to defaults BEFORE setting project so auto-save doesn't persist stale values
+      setSelectedTitle(null);
+      setVideoDescription("");
+      setVideoTags([]);
+      setVideoCategory("22");
+      setVideoVisibility("private");
+      setSelectedThumbnailIndices([]);
+      setDescSystemPrompt(DEFAULT_DESC_PROMPT);
+      setThumbnailUrls([]);
+      setThumbnailText("");
+      // Reset render/upload state
+      setRenderProgress(null);
+      setYoutubeUploadProgress(null);
+      setYoutubeUploadResult(null);
+      setYoutubeUploadError(null);
+      // Navigate immediately — don't wait for scan
       setProject(proj);
-      setClips(watchData.clips || []);
+      setClips([]);
       setTimelineItems([]);
       setIsWatching(true);
+      // Start watching in background — clips arrive via websocket
+      setScanningFiles(true);
+      fetch(`/api/projects/${proj.id}/watch/start`, { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => { if (data.clips?.length) setClips(data.clips); })
+        .finally(() => setScanningFiles(false));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {

@@ -1,0 +1,63 @@
+import { useEffect, useRef } from "react";
+import { useTimelineStore } from "../stores/timelineStore";
+
+export function useAutoSaveMetadata() {
+  const project = useTimelineStore((s) => s.project);
+  const selectedTitle = useTimelineStore((s) => s.selectedTitle);
+  const videoDescription = useTimelineStore((s) => s.videoDescription);
+  const videoTags = useTimelineStore((s) => s.videoTags);
+  const videoCategory = useTimelineStore((s) => s.videoCategory);
+  const videoVisibility = useTimelineStore((s) => s.videoVisibility);
+  const selectedThumbnailIndices = useTimelineStore((s) => s.selectedThumbnailIndices);
+  const descSystemPrompt = useTimelineStore((s) => s.descSystemPrompt);
+  const thumbnailUrls = useTimelineStore((s) => s.thumbnailUrls);
+  const thumbnailText = useTimelineStore((s) => s.thumbnailText);
+  const setSaveStatus = useTimelineStore((s) => s.setSaveStatus);
+
+  const initializedRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      return;
+    }
+    if (!project) return;
+
+    setSaveStatus("saving");
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+
+    timerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/projects/${project.id}/metadata`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            selected_title: selectedTitle,
+            video_description: videoDescription,
+            video_tags: JSON.stringify(videoTags),
+            video_category: videoCategory,
+            video_visibility: videoVisibility,
+            selected_thumbnail_idx: selectedThumbnailIndices[0] ?? null,
+            desc_system_prompt: descSystemPrompt,
+            thumbnail_urls: JSON.stringify(thumbnailUrls),
+            locked_thumbnail_indices: JSON.stringify(selectedThumbnailIndices),
+            thumbnail_text: thumbnailText,
+          }),
+        });
+        if (res.ok) {
+          setSaveStatus("saved");
+          fadeTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2000);
+        }
+      } catch {
+        setSaveStatus("idle");
+      }
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [project, selectedTitle, videoDescription, videoTags, videoCategory, videoVisibility, selectedThumbnailIndices, descSystemPrompt, thumbnailUrls, thumbnailText]);
+}

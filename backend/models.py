@@ -26,6 +26,19 @@ class Project(Base):
     watch_directory = Column(String, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
+    # Persisted video metadata
+    selected_title = Column(String, nullable=True)
+    video_description = Column(String, nullable=True)
+    video_tags = Column(String, nullable=True)  # JSON array string
+    video_category = Column(String, default="22")
+    video_visibility = Column(String, default="private")
+    selected_thumbnail_idx = Column(Integer, nullable=True)
+    desc_system_prompt = Column(String, nullable=True)
+    thumbnail_urls = Column(String, nullable=True)  # JSON array
+    locked_thumbnail_indices = Column(String, nullable=True)  # JSON array
+    thumbnail_text = Column(String, nullable=True)
+    render_path = Column(String, nullable=True)
+
     clips = relationship("Clip", back_populates="project", cascade="all, delete-orphan")
     timeline_items = relationship("TimelineItem", back_populates="project", cascade="all, delete-orphan")
 
@@ -40,6 +53,7 @@ class Clip(Base):
     clip_type = Column(Enum(ClipType), nullable=True)
     status = Column(Enum(ProcessingStatus), default=ProcessingStatus.PENDING)
     duration = Column(Float, nullable=True)
+    recorded_at = Column(DateTime, nullable=True)
     transcript = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
@@ -73,3 +87,15 @@ class TimelineItem(Base):
     project = relationship("Project", back_populates="timeline_items")
     clip = relationship("Clip")
     sub_clip = relationship("SubClip")
+
+
+class YouTubeCredential(Base):
+    __tablename__ = "youtube_credentials"
+
+    id = Column(Integer, primary_key=True)
+    channel_name = Column(String, nullable=True)
+    access_token = Column(String, nullable=False)
+    refresh_token = Column(String, nullable=False)
+    token_expiry = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -9,6 +9,7 @@ from database import SessionLocal
 from models import Clip, ProcessingStatus
 from routes.ws import broadcast
 from config import VIDEO_EXTENSIONS
+from services.silence_remover import get_creation_time
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +63,12 @@ class VideoFileHandler(FileSystemEventHandler):
                 logger.info(f"[WATCHER] Already in DB, skipping: {path}")
                 return
 
+            recorded_at = get_creation_time(path)
             clip = Clip(
                 project_id=self.project_id,
                 source_path=path,
                 status=ProcessingStatus.PENDING,
+                recorded_at=recorded_at,
             )
             db.add(clip)
             db.commit()
@@ -118,28 +121,71 @@ def start_watching(project_id: int, directory: str) -> list[int]:
     return clip_ids
 
 
+def _broadcast_sync(project_id: int, event: str, data: dict):
+    """Fire-and-forget broadcast from sync code."""
+    if _main_loop and _main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(broadcast(project_id, event, data), _main_loop)
+
+
 def _scan_existing(project_id: int, directory: str) -> list[int]:
-    """Scan directory for video files, create Clip rows. Returns new clip IDs."""
+    """Scan directory for video files, create Clip rows sorted by creation_time. Returns new clip IDs."""
     db = SessionLocal()
     new_ids = []
     try:
-        for entry in Path(directory).iterdir():
-            if entry.is_file() and entry.suffix.lower() in VIDEO_EXTENSIONS:
-                path = str(entry)
-                existing = db.query(Clip).filter(
-                    Clip.source_path == path, Clip.project_id == project_id
-                ).first()
-                if existing:
-                    continue
-                clip = Clip(
-                    project_id=project_id,
-                    source_path=path,
-                    status=ProcessingStatus.PENDING,
-                )
-                db.add(clip)
-                db.commit()
-                db.refresh(clip)
-                new_ids.append(clip.id)
+        # Discover video files
+        paths = [
+            str(entry) for entry in Path(directory).iterdir()
+            if entry.is_file() and entry.suffix.lower() in VIDEO_EXTENSIONS
+        ]
+
+        # Filter out files already in DB
+        new_paths = []
+        for path in paths:
+            existing = db.query(Clip).filter(
+                Clip.source_path == path, Clip.project_id == project_id
+            ).first()
+            if not existing:
+                new_paths.append(path)
+
+        total = len(new_paths)
+        if total == 0:
+            return new_ids
+
+        _broadcast_sync(project_id, "scan_progress", {
+            "current": 0, "total": total, "stage": "probing",
+        })
+
+        # Probe each file for creation_time
+        video_files: list[tuple[str, any]] = []
+        for i, path in enumerate(new_paths):
+            recorded_at = get_creation_time(path)
+            video_files.append((path, recorded_at))
+            _broadcast_sync(project_id, "scan_progress", {
+                "current": i + 1, "total": total, "stage": "probing",
+                "filename": Path(path).name,
+            })
+
+        # Sort by creation_time; files without it go to the end, sub-sorted by filename
+        from datetime import datetime, timezone
+        MAX_DT = datetime.max.replace(tzinfo=timezone.utc)
+        video_files.sort(key=lambda x: (x[1] or MAX_DT, Path(x[0]).name))
+
+        _broadcast_sync(project_id, "scan_progress", {
+            "current": total, "total": total, "stage": "done",
+        })
+
+        for path, recorded_at in video_files:
+            clip = Clip(
+                project_id=project_id,
+                source_path=path,
+                status=ProcessingStatus.PENDING,
+                recorded_at=recorded_at,
+            )
+            db.add(clip)
+            db.commit()
+            db.refresh(clip)
+            new_ids.append(clip.id)
+            logger.info(f"[WATCHER] Clip created: {Path(path).name} recorded_at={recorded_at}")
     finally:
         db.close()
     return new_ids

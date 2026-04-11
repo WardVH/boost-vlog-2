@@ -25,7 +25,20 @@ async def start_render(project_id: int, db: Session = Depends(get_db)):
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     output_path = str(PROCESSED_DIR / f"project_{project_id}_render.mp4")
 
-    task = asyncio.create_task(render_timeline(project_id, output_path))
+    async def do_render():
+        await render_timeline(project_id, output_path)
+        # Save render path to DB
+        from database import SessionLocal
+        render_db = SessionLocal()
+        try:
+            p = render_db.query(Project).filter(Project.id == project_id).first()
+            if p:
+                p.render_path = output_path
+                render_db.commit()
+        finally:
+            render_db.close()
+
+    task = asyncio.create_task(do_render())
     _render_tasks[project_id] = task
 
     return {"ok": True, "output_path": output_path}

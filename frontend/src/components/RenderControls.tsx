@@ -1,52 +1,57 @@
-import { useState } from "react";
 import { useTimelineStore } from "../stores/timelineStore";
 
 export function RenderControls() {
-  const { project, timelineItems, renderProgress, renderStage, setRenderProgress } =
+  const { project, timelineItems, renderProgress, renderStage, setRenderProgress, setProject } =
     useTimelineStore();
-  const [rendering, setRendering] = useState(false);
 
   if (!project || timelineItems.length === 0) return null;
 
   const startRender = async () => {
-    setRendering(true);
     setRenderProgress(0, "starting");
     try {
       const res = await fetch(`/api/render/${project.id}`, { method: "POST" });
       if (!res.ok) {
         const data = await res.json();
         alert(data.detail || "Render failed to start");
-        setRendering(false);
         setRenderProgress(null);
       }
     } catch {
-      setRendering(false);
       setRenderProgress(null);
     }
   };
 
   const isDone = renderStage === "done" && renderProgress === 100;
+  const rendering = renderProgress != null && !isDone;
+  const hasRender = isDone || project.render_path;
 
-  if (isDone) {
+  if (hasRender && !rendering) {
     return (
       <div className="render-controls done">
-        <span className="render-status">Render complete!</span>
-        <a
-          href={`/api/render/${project.id}/download`}
-          className="btn btn-primary"
-          download
-        >
-          Download Video
-        </a>
-        <button
-          className="btn btn-ghost"
-          onClick={() => {
-            setRenderProgress(null);
-            setRendering(false);
-          }}
-        >
-          Dismiss
-        </button>
+        <video
+          className="render-preview"
+          src={`/api/render/${project.id}/download`}
+          controls
+        />
+        <div className="render-actions">
+          <span className="render-status">
+            {isDone ? "Render complete!" : "Previously exported"}
+          </span>
+          <button className="btn btn-primary" onClick={startRender}>
+            Re-export
+          </button>
+          {isDone && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                // Update project in store so render_path is set for future reference
+                setProject({ ...project, render_path: `project_${project.id}_render.mp4` });
+                setRenderProgress(null);
+              }}
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
       </div>
     );
   }

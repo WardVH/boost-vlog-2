@@ -57,6 +57,20 @@ export function useWebSocket(projectId: number | null) {
           refreshTimeline(projectId);
           break;
 
+        case "scan_progress":
+          if (msg.data.stage === "done") {
+            store.setScanProgress(null);
+            store.setScanningFiles(false);
+          } else {
+            store.setScanningFiles(true);
+            store.setScanProgress({
+              current: msg.data.current as number,
+              total: msg.data.total as number,
+              filename: msg.data.filename as string | undefined,
+            });
+          }
+          break;
+
         case "render_progress":
           store.setRenderProgress(
             msg.data.percent as number,
@@ -66,6 +80,23 @@ export function useWebSocket(projectId: number | null) {
 
         case "render_done":
           store.setRenderProgress(100, "done");
+          break;
+
+        case "youtube_upload_progress":
+          store.setYoutubeUploadProgress(msg.data.percent as number);
+          break;
+
+        case "youtube_upload_done":
+          store.setYoutubeUploadProgress(100);
+          store.setYoutubeUploadResult({
+            videoId: msg.data.video_id as string,
+            videoUrl: msg.data.video_url as string,
+          });
+          break;
+
+        case "youtube_upload_error":
+          store.setYoutubeUploadProgress(null);
+          store.setYoutubeUploadError(msg.data.error as string);
           break;
       }
     };

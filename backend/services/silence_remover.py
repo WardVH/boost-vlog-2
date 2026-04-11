@@ -1,10 +1,28 @@
 import asyncio
 import re
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Awaitable
 from config import SILENCE_THRESH_DB, MIN_SILENCE_DURATION
 
 ProgressCb = Callable[[float, str], Awaitable[None]] | None
+
+
+def get_creation_time(path: str) -> datetime | None:
+    """Extract creation_time metadata from a video file. Returns None if unavailable."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format_tags=creation_time",
+             "-of", "default=nw=1:nokey=1", path],
+            capture_output=True, text=True, timeout=10,
+        )
+        raw = result.stdout.strip()
+        if not raw:
+            return None
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 async def get_duration(input_path: str) -> float:

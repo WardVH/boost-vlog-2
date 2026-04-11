@@ -6,7 +6,7 @@ from database import SessionLocal
 from models import Clip, SubClip, TimelineItem, ProcessingStatus, ClipType
 from services.transcriber import extract_audio, transcribe_file
 from services.classifier import classify
-from services.silence_remover import get_duration
+from services.silence_remover import get_duration, get_creation_time
 from routes.ws import broadcast
 from config import BROLL_NUM_CLIPS, BROLL_CLIP_DURATION
 
@@ -25,6 +25,10 @@ async def process_clip(clip_id: int):
             clip.duration = await get_duration(clip.source_path)
         except Exception:
             clip.duration = 0
+
+        # Ensure recorded_at is set (fallback if not set during discovery)
+        if not clip.recorded_at:
+            clip.recorded_at = get_creation_time(clip.source_path)
 
         total_duration = clip.duration or 0
 
