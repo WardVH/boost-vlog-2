@@ -1,22 +1,22 @@
 import asyncio
+import json
 import logging
-import re
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 from database import SessionLocal
-import shutil
 from models import TimelineItem, MusicItem, Asset, TitleItem, CaptionItem, TimestampItem
 from routes.ws import broadcast
-from config import BROLL_AUDIO_VOLUME
-from services.ducker import compute_volume_envelope, envelope_to_ffmpeg_expr
-from services.sfx_generator import ensure_title_sfx
+from services.ducker import compute_volume_envelope
+from services.sfx_generator import TITLE_IN_PATH, TITLE_OUT_PATH, ensure_title_sfx
 from routes.music import _build_timeline_segments
-from config import TITLE_SFX_VOLUME
 
-_OUT_TIME_RE = re.compile(r"out_time_us=(\d+)")
+BASE_URL = "http://127.0.0.1:8000"
+FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
+FPS = 30
 
 
 def _resolve_source_and_range(item: TimelineItem) -> tuple[str, float, float, str | None] | None:
@@ -34,116 +34,102 @@ def _resolve_source_and_range(item: TimelineItem) -> tuple[str, float, float, st
     return None
 
 
-async def _probe_audio_streams(segments: list[tuple[str, float, float, str | None]]) -> dict[str, bool]:
-    """Check which source files have audio streams. Returns {path: has_audio}."""
-    unique_paths = set(seg[0] for seg in segments)
-
-    async def _probe(path: str) -> tuple[str, bool]:
-        proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "quiet", "-select_streams", "a",
-            "-show_entries", "stream=index", "-of", "csv=p=0", path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await proc.communicate()
-        return (path, bool(stdout.strip()))
-
-    results = await asyncio.gather(*[_probe(p) for p in unique_paths])
-    return dict(results)
-
-
-def _build_concat_filter(
-    segments: list[tuple[str, float, float, str | None]],
-    has_audio: dict[str, bool],
-    has_music: bool = False,
-    width: int = 1920,
-    height: int = 1080,
-    fps: int = 30,
-) -> tuple[list[str], str]:
-    """Build FFmpeg input args and filter_complex for single-pass concat.
-
-    Deduplicates source files so each is opened only once as an input.
-    """
-    # Map unique source paths to input indices
-    source_to_idx: dict[str, int] = {}
-    input_args = []
-    for seg in segments:
-        source = seg[0]
-        if source not in source_to_idx:
-            source_to_idx[source] = len(source_to_idx)
-            input_args.extend(["-i", source])
-
-    filter_parts = []
-    for i, (source, start, end, clip_type) in enumerate(segments):
-        inp = source_to_idx[source]
-        duration = end - start
-
-        vf = (
-            f"[{inp}:v]trim=start={start}:end={end},setpts=PTS-STARTPTS,"
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-            f"fps={fps}[v{i}]"
-        )
-        filter_parts.append(vf)
-
-        if has_audio.get(source, False):
-            af = (
-                f"[{inp}:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,"
-                f"aresample=48000,aformat=channel_layouts=stereo"
-            )
-            if has_music and clip_type == "broll":
-                af += f",volume={BROLL_AUDIO_VOLUME}"
-            af += f"[a{i}]"
+def _build_input_props(
+    items: list[TimelineItem],
+    music_items: list[MusicItem],
+    title_items: list[TitleItem],
+    caption_items: list[CaptionItem],
+    timestamp_items: list[TimestampItem],
+    volume_envelope: list[dict],
+) -> dict:
+    """Serialize all data into Remotion inputProps with absolute URLs."""
+    timeline_data = []
+    for item in items:
+        if item.sub_clip_id and item.sub_clip:
+            sub = item.sub_clip
+            parent = sub.parent_clip
+            if not parent:
+                continue
+            playback_path = parent.processed_path or parent.source_path
+            video_url = f"/api/fs/serve-video?path={quote(playback_path, safe='')}"
+            start_time = sub.start_time
+            end_time = sub.end_time
+            duration = end_time - start_time
+            clip_type = parent.clip_type.value if parent.clip_type else None
+            label = parent.source_path.split("/")[-1]
+        elif item.clip_id and item.clip:
+            clip = item.clip
+            playback_path = clip.processed_path or clip.source_path
+            video_url = f"/api/fs/serve-video?path={quote(playback_path, safe='')}"
+            start_time = 0
+            end_time = clip.duration or 0
+            duration = end_time
+            clip_type = clip.clip_type.value if clip.clip_type else None
+            label = clip.source_path.split("/")[-1]
         else:
-            af = (
-                f"anullsrc=r=48000:cl=stereo[_sil{i}];"
-                f"[_sil{i}]atrim=duration={duration},asetpts=PTS-STARTPTS[a{i}]"
-            )
-        filter_parts.append(af)
+            continue
 
-    concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(len(segments)))
-    filter_parts.append(f"{concat_inputs}concat=n={len(segments)}:v=1:a=1[vout][aout]")
+        if duration < 0.034:
+            continue
 
-    return input_args, ";".join(filter_parts)
+        timeline_data.append({
+            "id": item.id,
+            "clip_id": item.clip_id,
+            "sub_clip_id": item.sub_clip_id,
+            "position": item.position,
+            "video_url": video_url,
+            "duration": duration,
+            "start_time": start_time,
+            "end_time": end_time,
+            "label": label,
+            "clip_type": clip_type,
+        })
 
+    music_data = [
+        {
+            "id": mi.id,
+            "asset_id": mi.asset_id,
+            "asset_name": mi.asset.name if mi.asset else "Unknown",
+            "file_path": None,
+            "start_time": mi.start_time,
+            "end_time": mi.end_time,
+            "volume": mi.volume,
+        }
+        for mi in music_items
+    ]
 
-async def _run_ffmpeg_with_progress(
-    cmd: list[str],
-    total_duration: float,
-    project_id: int,
-    pct_start: int = 0,
-    pct_end: int = 70,
-) -> None:
-    """Run FFmpeg with -progress pipe:1 for reliable progress reporting."""
-    cmd = [*cmd, "-progress", "pipe:1"]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    last_pct = -1
+    title_data = [
+        {"id": ti.id, "text": ti.text, "start_time": ti.start_time, "end_time": ti.end_time}
+        for ti in title_items
+    ]
 
-    async def _read_progress():
-        nonlocal last_pct
-        async for raw_line in proc.stdout:
-            line = raw_line.decode("utf-8", errors="replace").strip()
-            match = _OUT_TIME_RE.match(line)
-            if match and total_duration > 0:
-                current = int(match.group(1)) / 1_000_000
-                ratio = min(current / total_duration, 1.0)
-                pct = pct_start + int(ratio * (pct_end - pct_start))
-                if pct != last_pct:
-                    await broadcast(project_id, "render_progress", {
-                        "percent": pct, "stage": "rendering",
-                    })
-                    last_pct = pct
+    caption_data = [
+        {"id": ci.id, "text": ci.text, "start_time": ci.start_time, "end_time": ci.end_time}
+        for ci in caption_items
+    ]
 
-    async def _read_stderr():
-        return await proc.stderr.read()
+    timestamp_data = [
+        {"id": ts.id, "text": ts.text, "start_time": ts.start_time, "end_time": ts.end_time}
+        for ts in timestamp_items
+    ]
 
-    _, stderr_output = await asyncio.gather(_read_progress(), _read_stderr())
-    await proc.wait()
-    if proc.returncode != 0:
-        err = stderr_output.decode()[-1000:]
-        logger.error("FFmpeg failed (rc=%d): %s", proc.returncode, err)
-        raise RuntimeError(f"Render failed: {err}")
+    # Compute total duration in frames
+    total_frames = 0
+    for t in timeline_data:
+        total_frames += max(round(t["duration"] * FPS), 1)
+
+    return {
+        "items": timeline_data,
+        "musicItems": music_data,
+        "volumeEnvelope": volume_envelope,
+        "titleItems": title_data,
+        "captionItems": caption_data,
+        "timestampItems": timestamp_data,
+        "baseUrl": BASE_URL,
+        "sfxTitleInPath": f"{BASE_URL}/api/sfx/title-in",
+        "sfxTitleOutPath": f"{BASE_URL}/api/sfx/title-out",
+        "durationInFrames": total_frames,
+    }
 
 
 async def render_timeline(project_id: int, output_path: str) -> str:
@@ -159,16 +145,10 @@ async def render_timeline(project_id: int, output_path: str) -> str:
         if not items:
             raise ValueError("Timeline is empty")
 
-        segments = []
-        for item in items:
-            seg = _resolve_source_and_range(item)
-            if seg:
-                segments.append(seg)
+        await broadcast(project_id, "render_progress", {"percent": 0, "stage": "initializing"})
 
-        if not segments:
-            raise ValueError("No valid clips in timeline")
-
-        await broadcast(project_id, "render_progress", {"percent": 0, "stage": "rendering"})
+        # Ensure SFX files exist on disk
+        await ensure_title_sfx()
 
         music_items = (
             db.query(MusicItem)
@@ -176,72 +156,92 @@ async def render_timeline(project_id: int, output_path: str) -> str:
             .order_by(MusicItem.start_time)
             .all()
         )
-
-        logger.info("Rendering %d segments for project %d", len(segments), project_id)
-        await broadcast(project_id, "render_progress", {"percent": 0, "stage": "initializing"})
-        has_audio = await _probe_audio_streams(segments)
-        logger.info("Audio probe results: %s", has_audio)
-        input_args, filter_complex = _build_concat_filter(segments, has_audio, has_music=bool(music_items))
-        total_duration = sum(end - start for _, start, end, _ in segments)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cmd = ["ffmpeg", "-y", *input_args]
-
-            if len(filter_complex) > 500_000:
-                script_path = str(Path(tmpdir) / "filter.txt")
-                with open(script_path, "w") as f:
-                    f.write(filter_complex)
-                cmd.extend(["-filter_complex_script", script_path])
-            else:
-                cmd.extend(["-filter_complex", filter_complex])
-
-            cmd.extend([
-                "-map", "[vout]", "-map", "[aout]",
-                "-c:v", "h264_videotoolbox", "-q:v", "65",
-                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-                output_path,
-            ])
-
-            await _run_ffmpeg_with_progress(cmd, total_duration, project_id, 0, 70)
-
-        if music_items:
-            await broadcast(project_id, "render_progress", {"percent": 70, "stage": "mixing music"})
-            await _mix_music(items, music_items, output_path, project_id)
-
-        # Burn title overlays
         title_items = (
             db.query(TitleItem)
             .filter(TitleItem.project_id == project_id)
             .order_by(TitleItem.start_time)
             .all()
         )
-        if title_items:
-            await broadcast(project_id, "render_progress", {"percent": 91, "stage": "burning titles"})
-            await _burn_titles(title_items, output_path)
-            await broadcast(project_id, "render_progress", {"percent": 93, "stage": "mixing title sfx"})
-            await _mix_title_sfx(title_items, output_path)
-
-        # Burn timestamp overlays
-        timestamp_items = (
-            db.query(TimestampItem)
-            .filter(TimestampItem.project_id == project_id)
-            .order_by(TimestampItem.start_time)
-            .all()
-        )
-        if timestamp_items:
-            await broadcast(project_id, "render_progress", {"percent": 95, "stage": "burning timestamps"})
-            await _burn_timestamps(timestamp_items, output_path)
-
-        # Burn caption overlays
         caption_items = (
             db.query(CaptionItem)
             .filter(CaptionItem.project_id == project_id)
             .order_by(CaptionItem.start_time)
             .all()
         )
-        if caption_items:
-            await broadcast(project_id, "render_progress", {"percent": 97, "stage": "burning captions"})
-            await _burn_captions(caption_items, output_path)
+        timestamp_items = (
+            db.query(TimestampItem)
+            .filter(TimestampItem.project_id == project_id)
+            .order_by(TimestampItem.start_time)
+            .all()
+        )
+
+        # Compute volume envelope for music ducking
+        segments, total_duration = _build_timeline_segments(items)
+        envelope = compute_volume_envelope(segments, total_duration) if music_items else []
+
+        input_props = _build_input_props(
+            items, music_items, title_items, caption_items, timestamp_items, envelope,
+        )
+
+        if not input_props["items"]:
+            raise ValueError("No valid clips in timeline")
+
+        logger.info(
+            "Rendering %d clips, %d music, %d titles, %d captions, %d timestamps (%d frames) for project %d",
+            len(input_props["items"]), len(music_items), len(title_items),
+            len(caption_items), len(timestamp_items), input_props["durationInFrames"], project_id,
+        )
+
+        await broadcast(project_id, "render_progress", {"percent": 2, "stage": "bundling"})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            props_path = str(Path(tmpdir) / "props.json")
+            with open(props_path, "w") as f:
+                json.dump(input_props, f)
+
+            cmd = ["node", str(FRONTEND_DIR / "render.mjs"), props_path, output_path]
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(FRONTEND_DIR),
+            )
+
+            last_pct = -1
+
+            async def _read_progress():
+                nonlocal last_pct
+                async for raw_line in proc.stdout:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        pct = data.get("percent", 0)
+                        if pct != last_pct:
+                            await broadcast(project_id, "render_progress", {
+                                "percent": min(pct, 99), "stage": "rendering",
+                            })
+                            last_pct = pct
+                    except json.JSONDecodeError:
+                        pass
+
+            async def _read_stderr():
+                output = []
+                async for raw_line in proc.stderr:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if line:
+                        logger.info("[remotion] %s", line)
+                        output.append(line)
+                return "\n".join(output)
+
+            stderr_text, _ = await asyncio.gather(_read_stderr(), _read_progress())
+            await proc.wait()
+
+            if proc.returncode != 0:
+                logger.error("Remotion render failed (rc=%d): %s", proc.returncode, stderr_text[-1000:])
+                raise RuntimeError(f"Render failed: {stderr_text[-500:]}")
 
         await broadcast(project_id, "render_progress", {"percent": 100, "stage": "done"})
         await broadcast(project_id, "render_done", {"output_path": output_path})
@@ -253,290 +253,3 @@ async def render_timeline(project_id: int, output_path: str) -> str:
         raise
     finally:
         db.close()
-
-
-async def _mix_music(
-    timeline_items: list[TimelineItem],
-    music_items: list[MusicItem],
-    video_path: str,
-    project_id: int,
-):
-    """Concatenate music files and mix into the video with ducking."""
-    segments, total_duration = _build_timeline_segments(timeline_items)
-    envelope = compute_volume_envelope(segments, total_duration)
-    volume_expr = envelope_to_ffmpeg_expr(envelope)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Step 1: Build concatenated music track
-        music_track_path = str(Path(tmpdir) / "music_track.wav")
-
-        if len(music_items) == 1:
-            mi = music_items[0]
-            duration = mi.end_time - mi.start_time
-            cmd = [
-                "ffmpeg", "-y", "-i", mi.asset.file_path,
-                "-t", str(duration), "-ac", "2", "-ar", "48000",
-                music_track_path,
-            ]
-        else:
-            inputs = []
-            filter_parts = []
-            for i, mi in enumerate(music_items):
-                duration = mi.end_time - mi.start_time
-                inputs.extend(["-i", mi.asset.file_path])
-                filter_parts.append(f"[{i}:a]atrim=0:{duration},asetpts=PTS-STARTPTS[a{i}]")
-
-            concat_labels = "".join(f"[a{i}]" for i in range(len(music_items)))
-            filter_parts.append(f"{concat_labels}concat=n={len(music_items)}:v=0:a=1[music]")
-            filter_complex = ";".join(filter_parts)
-
-            cmd = [
-                "ffmpeg", "-y", *inputs,
-                "-filter_complex", filter_complex,
-                "-map", "[music]", "-ac", "2", "-ar", "48000",
-                music_track_path,
-            ]
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"Music concat failed: {stderr.decode()[-500:]}")
-
-        await broadcast(project_id, "render_progress", {"percent": 80, "stage": "mixing music"})
-
-        # Step 2: Mix music into video with ducking
-        mixed_path = str(Path(tmpdir) / "mixed.mp4")
-        filter_complex = (
-            f"[1:a]volume='{volume_expr}':eval=frame[ducked];"
-            f"[0:a][ducked]amix=inputs=2:duration=first:dropout_transition=0[aout]"
-        )
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-i", music_track_path,
-            "-filter_complex", filter_complex,
-            "-map", "0:v", "-map", "[aout]",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            mixed_path,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"Music mixing failed: {stderr.decode()[-500:]}")
-
-        await broadcast(project_id, "render_progress", {"percent": 95, "stage": "mixing music"})
-
-        # Replace original output with mixed version
-        shutil.move(mixed_path, video_path)
-
-
-def _find_inter_font() -> str | None:
-    """Find Inter variable font on the system."""
-    candidates = [
-        Path.home() / "Library/Fonts/Inter-VariableFont_opsz,wght.ttf",
-        Path("/usr/share/fonts/truetype/inter/Inter-VariableFont_opsz,wght.ttf"),
-    ]
-    for p in candidates:
-        if p.exists():
-            return str(p)
-    return None
-
-
-async def _burn_titles(
-    title_items: list[TitleItem],
-    video_path: str,
-) -> None:
-    """Burn title overlays into the video using FFmpeg drawtext filter."""
-    font_path = _find_inter_font()
-    font_arg = f":fontfile='{font_path}'" if font_path else ""
-
-    drawtext_parts = []
-    for ti in title_items:
-        escaped = ti.text.replace("'", "'\\''").replace(":", "\\:").replace(",", "\\,")
-        # Wide blurry black shadow (multiple offset shadows for blur effect)
-        dt = (
-            f"drawtext=text='{escaped}'"
-            f"{font_arg}"
-            f":fontsize=72"
-            f":fontcolor=white"
-            f":shadowcolor=black@0.8:shadowx=4:shadowy=4"
-            f":borderw=4:bordercolor=black@0.5"
-            f":x=(w-text_w)/2"
-            f":y=h*0.85-text_h/2"
-            f":enable='between(t,{ti.start_time},{ti.end_time})'"
-        )
-        drawtext_parts.append(dt)
-
-    filter_str = ",".join(drawtext_parts)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        titled_path = str(Path(tmpdir) / "titled.mp4")
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-vf", filter_str,
-            "-c:v", "h264_videotoolbox", "-q:v", "65",
-            "-c:a", "copy",
-            titled_path,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"Title burn failed: {stderr.decode()[-500:]}")
-
-        shutil.move(titled_path, video_path)
-
-
-async def _mix_title_sfx(
-    title_items: list[TitleItem],
-    video_path: str,
-) -> None:
-    """Mix subtle in/out sound effects at each title's start and end time."""
-    sfx_in_path, sfx_out_path = await ensure_title_sfx()
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        inputs = ["-i", video_path, "-i", sfx_in_path, "-i", sfx_out_path]
-
-        filter_parts = []
-        sfx_labels = []
-
-        for i, ti in enumerate(title_items):
-            in_delay_ms = int(ti.start_time * 1000)
-            label_in = f"sfx_in{i}"
-            filter_parts.append(
-                f"[1:a]acopy,adelay={in_delay_ms}|{in_delay_ms},volume={TITLE_SFX_VOLUME}[{label_in}]"
-            )
-            sfx_labels.append(f"[{label_in}]")
-
-            out_delay_ms = int(ti.end_time * 1000)
-            label_out = f"sfx_out{i}"
-            filter_parts.append(
-                f"[2:a]acopy,adelay={out_delay_ms}|{out_delay_ms},volume={TITLE_SFX_VOLUME}[{label_out}]"
-            )
-            sfx_labels.append(f"[{label_out}]")
-
-        n_sfx = len(sfx_labels)
-        sfx_mix_input = "".join(sfx_labels)
-        filter_parts.append(
-            f"{sfx_mix_input}amix=inputs={n_sfx}:duration=longest:dropout_transition=0[sfx_mixed]"
-        )
-        filter_parts.append(
-            f"[0:a][sfx_mixed]amix=inputs=2:duration=first:dropout_transition=0[aout]"
-        )
-
-        filter_complex = ";".join(filter_parts)
-        mixed_path = str(Path(tmpdir) / "sfx_mixed.mp4")
-
-        cmd = [
-            "ffmpeg", "-y",
-            *inputs,
-            "-filter_complex", filter_complex,
-            "-map", "0:v", "-map", "[aout]",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            mixed_path,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"Title SFX mixing failed: {stderr.decode()[-500:]}")
-
-        shutil.move(mixed_path, video_path)
-
-
-async def _burn_timestamps(
-    timestamp_items: list[TimestampItem],
-    video_path: str,
-) -> None:
-    """Burn timestamp overlays into the video — smaller text, top-left position."""
-    font_path = _find_inter_font()
-    font_arg = f":fontfile='{font_path}'" if font_path else ""
-
-    drawtext_parts = []
-    for ti in timestamp_items:
-        escaped = ti.text.replace("'", "'\\''").replace(":", "\\:").replace(",", "\\,")
-        dt = (
-            f"drawtext=text='{escaped}'"
-            f"{font_arg}"
-            f":fontsize=42"
-            f":fontcolor=white"
-            f":shadowcolor=black@0.8:shadowx=3:shadowy=3"
-            f":borderw=3:bordercolor=black@0.5"
-            f":x=60"
-            f":y=60"
-            f":enable='between(t,{ti.start_time},{ti.end_time})'"
-        )
-        drawtext_parts.append(dt)
-
-    filter_str = ",".join(drawtext_parts)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        stamped_path = str(Path(tmpdir) / "stamped.mp4")
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-vf", filter_str,
-            "-c:v", "h264_videotoolbox", "-q:v", "65",
-            "-c:a", "copy",
-            stamped_path,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"Timestamp burn failed: {stderr.decode()[-500:]}")
-
-        shutil.move(stamped_path, video_path)
-
-
-async def _burn_captions(
-    caption_items: list[CaptionItem],
-    video_path: str,
-) -> None:
-    """Burn caption subtitles into the video — smaller text with background box."""
-    font_path = _find_inter_font()
-    font_arg = f":fontfile='{font_path}'" if font_path else ""
-
-    drawtext_parts = []
-    for ci in caption_items:
-        escaped = ci.text.replace("'", "'\\''").replace(":", "\\:").replace(",", "\\,")
-        dt = (
-            f"drawtext=text='{escaped}'"
-            f"{font_arg}"
-            f":fontsize=42"
-            f":fontcolor=white"
-            f":box=1:boxcolor=black@0.6:boxborderw=12"
-            f":x=(w-text_w)/2"
-            f":y=h*0.90-text_h/2"
-            f":enable='between(t,{ci.start_time},{ci.end_time})'"
-        )
-        drawtext_parts.append(dt)
-
-    filter_str = ",".join(drawtext_parts)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        captioned_path = str(Path(tmpdir) / "captioned.mp4")
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-vf", filter_str,
-            "-c:v", "h264_videotoolbox", "-q:v", "65",
-            "-c:a", "copy",
-            captioned_path,
-        ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"Caption burn failed: {stderr.decode()[-500:]}")
-
-        shutil.move(captioned_path, video_path)

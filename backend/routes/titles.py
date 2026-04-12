@@ -13,6 +13,7 @@ def _build_timestamped_transcript(items: list[TimelineItem]) -> tuple[str, float
     """Walk ordered timeline items and produce a timestamped transcript string."""
     parts = []
     cursor = 0.0
+    seen_clip_ids: set[int] = set()
     for item in items:
         if item.sub_clip_id and item.sub_clip:
             sub = item.sub_clip
@@ -27,7 +28,13 @@ def _build_timestamped_transcript(items: list[TimelineItem]) -> tuple[str, float
         if duration < 0.034:
             continue
 
-        transcript = clip.transcript if clip else None
+        # Attach the parent clip's transcript only on the FIRST sub-clip from that clip
+        # to avoid repeating the same text for every speech segment
+        transcript = ""
+        if clip and clip.transcript and clip.id not in seen_clip_ids:
+            transcript = clip.transcript
+            seen_clip_ids.add(clip.id)
+
         if transcript:
             parts.append(f"[{cursor:.1f}s - {cursor + duration:.1f}s] {transcript}")
         cursor += duration

@@ -14,39 +14,47 @@ router = APIRouter()
 
 
 def _build_datetime_transcript(items: list[TimelineItem], tz: ZoneInfo) -> tuple[str, float]:
-    """Walk ordered timeline items and produce a transcript with both timeline positions and recording datetimes."""
+    """Walk ordered timeline items, collapsing consecutive sub-clips from the same source clip."""
     parts = []
     cursor = 0.0
+    last_clip_id = None
+    group_start = 0.0
+
     for item in items:
         if item.sub_clip_id and item.sub_clip:
             sub = item.sub_clip
             duration = sub.end_time - sub.start_time
             clip = sub.parent_clip
+            clip_id = clip.id if clip else None
         elif item.clip_id and item.clip:
             clip = item.clip
             duration = clip.duration or 0
+            clip_id = clip.id
         else:
             continue
 
         if duration < 0.034:
             continue
 
-        recorded_at = clip.recorded_at if clip else None
-        transcript = clip.transcript if clip else None
+        # If same clip as previous, just extend the cursor
+        if clip_id == last_clip_id and last_clip_id is not None:
+            cursor += duration
+            continue
 
+        # New clip — emit a line
+        recorded_at = clip.recorded_at if clip else None
         if recorded_at:
-            # recorded_at is UTC — convert to user's local timezone
             utc_dt = recorded_at.replace(tzinfo=timezone.utc)
             local_dt = utc_dt.astimezone(tz)
             datetime_str = local_dt.strftime("%A %B %d, %Y %I:%M %p")
         else:
             datetime_str = "unknown"
 
-        line = f"[{cursor:.1f}s - {cursor + duration:.1f}s] (recorded: {datetime_str})"
-        if transcript:
-            line += f" {transcript}"
+        clip_type = clip.clip_type.value if clip and clip.clip_type else "unknown"
+        line = f"[{cursor:.1f}s] (recorded: {datetime_str}) [{clip_type}]"
         parts.append(line)
 
+        last_clip_id = clip_id
         cursor += duration
 
     return "\n".join(parts), cursor

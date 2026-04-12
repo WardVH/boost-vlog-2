@@ -63,6 +63,7 @@ export interface MusicItem {
   id: number;
   asset_id: number;
   asset_name: string;
+  file_path?: string;
   start_time: number;
   end_time: number;
   volume: number;

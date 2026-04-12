@@ -91,9 +91,9 @@ def compose_thumbnail(frame_path: str, title_text: str, output_path: str) -> str
     draw = ImageDraw.Draw(img, "RGBA")
 
     # Text overlay with negative kerning
-    font = _load_font(72)
-    kerning = -3  # negative kerning (pixels)
-    wrapped = textwrap.fill(title_text, width=28)
+    font = _load_font(96)
+    kerning = -4  # negative kerning (pixels)
+    wrapped = textwrap.fill(title_text, width=20)
     lines = wrapped.split("\n")
 
     def _kerned_line_width(line: str) -> int:

@@ -10,8 +10,8 @@ def generate_title_overlays(timestamped_transcript: str, total_duration: float) 
     client = get_client()
 
     # Truncate very long transcripts
-    truncated = timestamped_transcript[:12000]
-    if len(timestamped_transcript) > 12000:
+    truncated = timestamped_transcript[:30000]
+    if len(timestamped_transcript) > 30000:
         truncated += "\n\n[transcript truncated]"
 
     response = client.messages.create(

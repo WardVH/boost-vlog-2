@@ -2,13 +2,23 @@ import React, { useCallback, useMemo } from "react";
 import { AbsoluteFill, Audio, OffthreadVideo, Sequence, useCurrentFrame } from "remotion";
 import { secondsToFrames, interpolateEnvelope, FPS } from "../lib/remotion";
 import { useTimelineStore } from "../stores/timelineStore";
-import type { TimelineItem } from "../types";
+import type { TimelineItem, MusicItem, TitleItem, CaptionItem, TimestampItem, VolumeKeypoint } from "../types";
 
 const PREMOUNT_FRAMES = 30;
 const BROLL_AUDIO_VOLUME = 0.15;
 
-interface Props {
+export interface Props {
   items: TimelineItem[];
+  musicItems?: MusicItem[];
+  volumeEnvelope?: VolumeKeypoint[];
+  titleItems?: TitleItem[];
+  captionItems?: CaptionItem[];
+  timestampItems?: TimestampItem[];
+  /** Base URL prefix for API paths during server-side render (e.g. "http://localhost:8000") */
+  baseUrl?: string;
+  /** Local file paths for SFX (server-side render only) */
+  sfxTitleInPath?: string;
+  sfxTitleOutPath?: string;
 }
 
 interface ClipLayout {
@@ -17,9 +27,21 @@ interface ClipLayout {
   durationInFrames: number;
 }
 
-export const TimelineComposition: React.FC<Props> = React.memo(({ items }) => {
+export const TimelineComposition: React.FC<Props> = React.memo(({
+  items,
+  musicItems: propMusic,
+  volumeEnvelope: propEnvelope,
+  titleItems: propTitles,
+  captionItems: propCaptions,
+  timestampItems: propTimestamps,
+  baseUrl = "",
+  sfxTitleInPath,
+  sfxTitleOutPath,
+}) => {
   const frame = useCurrentFrame();
-  const musicItems = useTimelineStore((s) => s.musicItems);
+
+  const storeMusic = useTimelineStore((s) => s.musicItems);
+  const musicItems = propMusic ?? storeMusic;
   const hasMusic = musicItems.length > 0;
 
   const layout = useMemo(() => {
@@ -52,7 +74,7 @@ export const TimelineComposition: React.FC<Props> = React.memo(({ items }) => {
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      <MusicLayer />
+      <MusicLayer musicItems={propMusic} volumeEnvelope={propEnvelope} baseUrl={baseUrl} />
       {toMount.map((i) => {
         const clip = layout[i];
         const videoStartFrame = secondsToFrames(clip.item.start_time);
@@ -66,10 +88,11 @@ export const TimelineComposition: React.FC<Props> = React.memo(({ items }) => {
           >
             <AbsoluteFill>
               <OffthreadVideo
-                src={clip.item.video_url}
+                src={`${baseUrl}${clip.item.video_url}`}
                 startFrom={videoStartFrame}
                 endAt={videoStartFrame + clip.durationInFrames}
                 pauseWhenBuffering
+                delayRenderTimeoutInMilliseconds={240000}
                 volume={hasMusic && clip.item.clip_type === "broll" ? BROLL_AUDIO_VOLUME : 1}
                 style={{ width: "100%", height: "100%", objectFit: "contain" }}
               />
@@ -77,9 +100,9 @@ export const TimelineComposition: React.FC<Props> = React.memo(({ items }) => {
           </Sequence>
         );
       })}
-      <TitleLayer />
-      <CaptionLayer />
-      <TimestampLayer />
+      <TitleLayer titleItems={propTitles} baseUrl={baseUrl} sfxTitleInPath={sfxTitleInPath} sfxTitleOutPath={sfxTitleOutPath} />
+      <CaptionLayer captionItems={propCaptions} />
+      <TimestampLayer timestampItems={propTimestamps} />
     </AbsoluteFill>
   );
 });
@@ -118,8 +141,9 @@ const TitleOverlay: React.FC<{ text: string }> = ({ text }) => {
 const TITLE_SFX_VOLUME = 0.5;
 const TITLE_SFX_DURATION_FRAMES = Math.round(0.15 * FPS); // ~5 frames
 
-const TitleLayer: React.FC = () => {
-  const titleItems = useTimelineStore((s) => s.titleItems);
+const TitleLayer: React.FC<{ titleItems?: TitleItem[]; baseUrl?: string; sfxTitleInPath?: string; sfxTitleOutPath?: string }> = ({ titleItems: propItems, baseUrl = "", sfxTitleInPath, sfxTitleOutPath }) => {
+  const storeItems = useTimelineStore((s) => s.titleItems);
+  const titleItems = propItems ?? storeItems;
 
   return (
     <>
@@ -137,11 +161,11 @@ const TitleLayer: React.FC = () => {
             </Sequence>
             {/* Title in SFX */}
             <Sequence from={startFrame} durationInFrames={TITLE_SFX_DURATION_FRAMES}>
-              <Audio src="/api/sfx/title-in" volume={TITLE_SFX_VOLUME} />
+              <Audio src={sfxTitleInPath || `${baseUrl}/api/sfx/title-in`} volume={TITLE_SFX_VOLUME} />
             </Sequence>
             {/* Title out SFX */}
             <Sequence from={endFrame} durationInFrames={TITLE_SFX_DURATION_FRAMES}>
-              <Audio src="/api/sfx/title-out" volume={TITLE_SFX_VOLUME} />
+              <Audio src={sfxTitleOutPath || `${baseUrl}/api/sfx/title-out`} volume={TITLE_SFX_VOLUME} />
             </Sequence>
           </React.Fragment>
         );
@@ -182,8 +206,9 @@ const CaptionOverlay: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const CaptionLayer: React.FC = () => {
-  const captionItems = useTimelineStore((s) => s.captionItems);
+const CaptionLayer: React.FC<{ captionItems?: CaptionItem[] }> = ({ captionItems: propItems }) => {
+  const storeItems = useTimelineStore((s) => s.captionItems);
+  const captionItems = propItems ?? storeItems;
 
   return (
     <>
@@ -237,8 +262,9 @@ const TimestampOverlay: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const TimestampLayer: React.FC = () => {
-  const timestampItems = useTimelineStore((s) => s.timestampItems);
+const TimestampLayer: React.FC<{ timestampItems?: TimestampItem[] }> = ({ timestampItems: propItems }) => {
+  const storeItems = useTimelineStore((s) => s.timestampItems);
+  const timestampItems = propItems ?? storeItems;
 
   return (
     <>
@@ -261,9 +287,15 @@ const TimestampLayer: React.FC = () => {
   );
 };
 
-const MusicLayer: React.FC = () => {
-  const musicItems = useTimelineStore((s) => s.musicItems);
-  const volumeEnvelope = useTimelineStore((s) => s.volumeEnvelope);
+const MusicLayer: React.FC<{ musicItems?: MusicItem[]; volumeEnvelope?: VolumeKeypoint[]; baseUrl?: string }> = ({
+  musicItems: propItems,
+  volumeEnvelope: propEnvelope,
+  baseUrl = "",
+}) => {
+  const storeItems = useTimelineStore((s) => s.musicItems);
+  const storeEnvelope = useTimelineStore((s) => s.volumeEnvelope);
+  const musicItems = propItems ?? storeItems;
+  const volumeEnvelope = propEnvelope ?? storeEnvelope;
 
   const makeVolumeCallback = useCallback(
     (musicStartTime: number) => {
@@ -290,7 +322,7 @@ const MusicLayer: React.FC = () => {
             durationInFrames={durationInFrames}
           >
             <Audio
-              src={`/api/assets/${mi.asset_id}/file`}
+              src={mi.file_path || `${baseUrl}/api/assets/${mi.asset_id}/file`}
               volume={makeVolumeCallback(mi.start_time)}
             />
           </Sequence>
