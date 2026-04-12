@@ -5,10 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from database import engine, Base
-from routes import projects, clips, timeline, render, ws, filesystem, generate, youtube, assets, music, titles, captions, timestamps, sfx, settings
+from routes import projects, clips, timeline, render, ws, filesystem, generate, youtube, assets, music, titles, captions, timestamps, sfx, settings, trackers, subscribes, remixes
 from workers.queue import processing_queue, process_worker
 from services.watcher import set_queue
-from config import PROCESSED_DIR, DATA_DIR, ASSETS_DIR
+from config import PROCESSED_DIR, DATA_DIR, ASSETS_DIR, REMIX_DIR
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,6 +18,7 @@ async def lifespan(app: FastAPI):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    REMIX_DIR.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     # Add new columns to existing tables (SQLite doesn't support IF NOT EXISTS for columns)
     with engine.connect() as conn:
@@ -86,3 +87,6 @@ app.include_router(captions.router, prefix="/api/captions", tags=["captions"])
 app.include_router(timestamps.router, prefix="/api/timestamps", tags=["timestamps"])
 app.include_router(sfx.router, prefix="/api/sfx", tags=["sfx"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
+app.include_router(trackers.router, prefix="/api/trackers", tags=["trackers"])
+app.include_router(subscribes.router, prefix="/api/subscribes", tags=["subscribes"])
+app.include_router(remixes.router, prefix="/api/remixes", tags=["remixes"])

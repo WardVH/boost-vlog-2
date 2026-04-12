@@ -28,7 +28,7 @@ export interface Clip {
   id: number;
   source_path: string;
   processed_path: string | null;
-  clip_type: "talking" | "broll" | null;
+  clip_type: "talking" | "broll" | "remix" | null;
   status: "pending" | "transcribing" | "classifying" | "processing" | "done" | "error";
   duration: number | null;
   transcript: string | null;
@@ -84,6 +84,20 @@ export interface CaptionItem {
 }
 
 export interface TimestampItem {
+  id: number
+  text: string
+  start_time: number
+  end_time: number
+}
+
+export interface TrackerItem {
+  id: number
+  start_time: number
+  end_time: number
+  overlay_url: string
+}
+
+export interface SubscribeItem {
   id: number
   text: string
   start_time: number

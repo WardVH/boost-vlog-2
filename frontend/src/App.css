@@ -446,6 +446,152 @@ input[type="text"]:focus {
   gap: 12px;
 }
 
+/* ── Track sidebar (Ableton-style) ── */
+
+.timeline-with-sidebar {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.timeline-with-sidebar .timeline-editor-wrapper {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.track-sidebar {
+  flex-shrink: 0;
+  width: 110px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-elevated, var(--bg));
+}
+
+.track-sidebar-ruler {
+  height: 42px;
+  border-bottom: 1px solid var(--border);
+}
+
+.track-sidebar-cell {
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+  padding: 0 8px;
+}
+
+.track-sidebar-cell:last-child {
+  border-bottom: none;
+}
+
+.track-sidebar-cell.available {
+  opacity: 0.6;
+}
+
+.track-sidebar-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.track-sidebar-btn {
+  width: 100%;
+  font-size: 11px;
+  padding: 5px 8px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  transition: all 0.15s;
+}
+
+.track-sidebar-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.track-sidebar-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Track-colored buttons when active */
+.track-sidebar-btn[data-track="music"] {
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.15);
+}
+
+.track-sidebar-btn[data-track="title"] {
+  border-color: rgba(34, 211, 238, 0.4);
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.15);
+}
+
+.track-sidebar-btn[data-track="caption"] {
+  border-color: rgba(74, 222, 128, 0.4);
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.15);
+}
+
+.track-sidebar-btn[data-track="timestamp"] {
+  border-color: rgba(251, 191, 36, 0.4);
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+}
+
+.track-sidebar-btn[data-track="tracker"] {
+  border-color: rgba(251, 146, 60, 0.4);
+  color: #fb923c;
+  background: rgba(251, 146, 60, 0.15);
+}
+
+.track-sidebar-btn[data-track="subscribe"] {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+}
+
+/* Loading progress animation */
+.track-sidebar-btn.loading {
+  position: relative;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.track-sidebar-btn.loading::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  animation: sidebar-progress 2.5s ease-in-out infinite;
+}
+
+@keyframes sidebar-progress {
+  0% { width: 0%; }
+  50% { width: 90%; }
+  100% { width: 100%; }
+}
+
+.track-add-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 0 0 110px;
+}
+
 .timeline-autofit {
   display: flex;
   align-items: center;
@@ -471,8 +617,6 @@ input[type="text"]:focus {
 
 /* react-timeline-editor wrapper */
 .timeline-editor-wrapper {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -512,6 +656,10 @@ input[type="text"]:focus {
 
 .tl-action-render.broll {
   background: rgba(16, 185, 129, 0.5);
+}
+
+.tl-action-render.remix {
+  background: rgba(236, 72, 153, 0.5);
 }
 
 .tl-action-label {
@@ -1312,19 +1460,6 @@ input[type="text"]:focus {
   color: var(--danger);
 }
 
-/* ── Music Controls ── */
-
-.music-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.music-info {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
 /* ── Music Track on Timeline ── */
 
 .tl-action-render.music {
@@ -1344,17 +1479,6 @@ input[type="text"]:focus {
 }
 
 /* ── Title Track on Timeline ── */
-
-.title-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.title-info {
-  font-size: 12px;
-  color: var(--text-dim);
-}
 
 .tl-action-render.title {
   background: rgba(34, 211, 238, 0.2);
@@ -1389,18 +1513,7 @@ input[type="text"]:focus {
   font-family: inherit;
 }
 
-/* ── Timestamp Track on Timeline ── */
-
-.caption-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.caption-info {
-  font-size: 12px;
-  color: var(--text-dim);
-}
+/* ── Caption Track on Timeline ── */
 
 .tl-action-render.caption {
   background: rgba(74, 222, 128, 0.2);
@@ -1435,16 +1548,7 @@ input[type="text"]:focus {
   font-family: inherit;
 }
 
-.timestamp-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.timestamp-info {
-  font-size: 12px;
-  color: var(--text-dim);
-}
+/* ── Timestamp Track on Timeline ── */
 
 .tl-action-render.timestamp {
   background: rgba(251, 191, 36, 0.2);
@@ -1477,6 +1581,23 @@ input[type="text"]:focus {
   font-size: 11px;
   padding: 2px 6px;
   font-family: inherit;
+}
+
+/* ── Tracker Track on Timeline ── */
+
+.tl-action-render.tracker {
+  background: rgba(249, 115, 22, 0.2);
+  border: 1px solid rgba(249, 115, 22, 0.5);
+  border-radius: 4px;
+  padding: 2px 6px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.tl-action-render.tracker .tl-action-label {
+  color: #f97316;
+  font-size: 11px;
 }
 
 /* ── Settings ── */

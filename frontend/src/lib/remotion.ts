@@ -1,5 +1,5 @@
 import type { TimelineRow, TimelineAction } from "@xzdarcy/react-timeline-editor";
-import type { TimelineItem, MusicItem, TitleItem, CaptionItem, TimestampItem, VolumeKeypoint } from "../types";
+import type { TimelineItem, MusicItem, TitleItem, CaptionItem, TimestampItem, TrackerItem, SubscribeItem, VolumeKeypoint } from "../types";
 
 export const FPS = 30;
 
@@ -38,11 +38,21 @@ export interface TimestampAction extends TimelineAction {
   timestampId: number;
 }
 
+export interface TrackerAction extends TimelineAction {
+  trackerId: number;
+  overlayUrl: string;
+}
+
+export interface SubscribeAction extends TimelineAction {
+  subscribeText: string;
+  subscribeId: number;
+}
+
 /**
  * Convert backend TimelineItem[] and MusicItem[] into react-timeline-editor format.
  * Produces a video track and optionally a music track.
  */
-export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[], titleItems?: TitleItem[], captionItems?: CaptionItem[], timestampItems?: TimestampItem[]): {
+export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[], titleItems?: TitleItem[], captionItems?: CaptionItem[], timestampItems?: TimestampItem[], trackerItems?: TrackerItem[], subscribeItems?: SubscribeItem[]): {
   rows: TimelineRow[];
   actions: VideoAction[];
   totalDuration: number;
@@ -102,20 +112,32 @@ export function toEditorData(items: TimelineItem[], musicItems?: MusicItem[], ti
     timestampId: ts.id,
   }));
 
+  const trackerActions: TrackerAction[] = (trackerItems || []).map((ti) => ({
+    id: `tracker-${ti.id}`,
+    start: ti.start_time,
+    end: ti.end_time,
+    effectId: "tracker",
+    trackerId: ti.id,
+    overlayUrl: ti.overlay_url,
+  }));
+
+  const subscribeActions: SubscribeAction[] = (subscribeItems || []).map((si) => ({
+    id: `subscribe-${si.id}`,
+    start: si.start_time,
+    end: si.end_time,
+    effectId: "subscribe",
+    subscribeText: si.text,
+    subscribeId: si.id,
+  }));
+
   const rows: TimelineRow[] = [
     { id: "video-track", actions },
-    ...(musicActions.length > 0
-      ? [{ id: "music-track", actions: musicActions }]
-      : []),
-    ...(titleActions.length > 0
-      ? [{ id: "title-track", actions: titleActions }]
-      : []),
-    ...(captionActions.length > 0
-      ? [{ id: "caption-track", actions: captionActions }]
-      : []),
-    ...(timestampActions.length > 0
-      ? [{ id: "timestamp-track", actions: timestampActions }]
-      : []),
+    { id: "music-track", actions: musicActions },
+    { id: "title-track", actions: titleActions },
+    { id: "caption-track", actions: captionActions },
+    { id: "timestamp-track", actions: timestampActions },
+    { id: "tracker-track", actions: trackerActions },
+    { id: "subscribe-track", actions: subscribeActions },
   ];
 
   return { rows, actions, totalDuration: cursor };

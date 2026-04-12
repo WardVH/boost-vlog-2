@@ -8,7 +8,7 @@ from urllib.parse import quote
 logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 from database import SessionLocal
-from models import TimelineItem, MusicItem, Asset, TitleItem, CaptionItem, TimestampItem
+from models import TimelineItem, MusicItem, Asset, TitleItem, CaptionItem, TimestampItem, TrackerItem, SubscribeItem
 from routes.ws import broadcast
 from services.ducker import compute_volume_envelope
 from services.sfx_generator import TITLE_IN_PATH, TITLE_OUT_PATH, ensure_title_sfx
@@ -40,6 +40,8 @@ def _build_input_props(
     title_items: list[TitleItem],
     caption_items: list[CaptionItem],
     timestamp_items: list[TimestampItem],
+    tracker_items: list[TrackerItem],
+    subscribe_items: list[SubscribeItem],
     volume_envelope: list[dict],
 ) -> dict:
     """Serialize all data into Remotion inputProps with absolute URLs."""
@@ -113,6 +115,22 @@ def _build_input_props(
         for ts in timestamp_items
     ]
 
+    from routes.trackers import _overlay_url
+    tracker_data = [
+        {
+            "id": ti.id,
+            "start_time": ti.start_time,
+            "end_time": ti.end_time,
+            "overlay_url": _overlay_url(ti.overlay_path),
+        }
+        for ti in tracker_items
+    ]
+
+    subscribe_data = [
+        {"id": si.id, "text": si.text, "start_time": si.start_time, "end_time": si.end_time}
+        for si in subscribe_items
+    ]
+
     # Compute total duration in frames
     total_frames = 0
     for t in timeline_data:
@@ -125,6 +143,8 @@ def _build_input_props(
         "titleItems": title_data,
         "captionItems": caption_data,
         "timestampItems": timestamp_data,
+        "trackerItems": tracker_data,
+        "subscribeItems": subscribe_data,
         "baseUrl": BASE_URL,
         "sfxTitleInPath": f"{BASE_URL}/api/sfx/title-in",
         "sfxTitleOutPath": f"{BASE_URL}/api/sfx/title-out",
@@ -174,22 +194,34 @@ async def render_timeline(project_id: int, output_path: str) -> str:
             .order_by(TimestampItem.start_time)
             .all()
         )
+        tracker_items = (
+            db.query(TrackerItem)
+            .filter(TrackerItem.project_id == project_id)
+            .order_by(TrackerItem.start_time)
+            .all()
+        )
+        subscribe_items = (
+            db.query(SubscribeItem)
+            .filter(SubscribeItem.project_id == project_id)
+            .order_by(SubscribeItem.start_time)
+            .all()
+        )
 
         # Compute volume envelope for music ducking
         segments, total_duration = _build_timeline_segments(items)
         envelope = compute_volume_envelope(segments, total_duration) if music_items else []
 
         input_props = _build_input_props(
-            items, music_items, title_items, caption_items, timestamp_items, envelope,
+            items, music_items, title_items, caption_items, timestamp_items, tracker_items, subscribe_items, envelope,
         )
 
         if not input_props["items"]:
             raise ValueError("No valid clips in timeline")
 
         logger.info(
-            "Rendering %d clips, %d music, %d titles, %d captions, %d timestamps (%d frames) for project %d",
+            "Rendering %d clips, %d music, %d titles, %d captions, %d timestamps, %d subscribes (%d frames) for project %d",
             len(input_props["items"]), len(music_items), len(title_items),
-            len(caption_items), len(timestamp_items), input_props["durationInFrames"], project_id,
+            len(caption_items), len(timestamp_items), len(subscribe_items), input_props["durationInFrames"], project_id,
         )
 
         await broadcast(project_id, "render_progress", {"percent": 2, "stage": "bundling"})

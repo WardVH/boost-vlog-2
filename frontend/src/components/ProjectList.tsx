@@ -21,6 +21,8 @@ export function ProjectList() {
     setTitleItems,
     setCaptionItems,
     setTimestampItems,
+    setTrackerItems,
+    setSubscribeItems,
   } = useTimelineStore();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +97,18 @@ export function ProjectList() {
       .then((data) => {
         if (data) setTimestampItems(data.items || []);
       });
+    // Load tracker items
+    fetch(`/api/trackers/${id}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data) setTrackerItems(data.items || []);
+      });
+    // Load subscribe items
+    fetch(`/api/subscribes/${id}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data) setSubscribeItems(data.items || []);
+      });
     setIsWatching(true);
     // Start watching in background — new clips arrive via websocket
     setScanningFiles(true);
@@ -150,6 +164,8 @@ export function ProjectList() {
       setTitleItems([]);
       setCaptionItems([]);
       setTimestampItems([]);
+      setTrackerItems([]);
+      setSubscribeItems([]);
       // Navigate immediately — don't wait for scan
       setProject(proj);
       setClips([]);

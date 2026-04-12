@@ -7,6 +7,7 @@ from database import Base
 class ClipType(str, enum.Enum):
     TALKING = "talking"
     BROLL = "broll"
+    REMIX = "remix"
 
 
 class AssetType(str, enum.Enum):
@@ -50,6 +51,8 @@ class Project(Base):
     title_items = relationship("TitleItem", back_populates="project", cascade="all, delete-orphan")
     caption_items = relationship("CaptionItem", back_populates="project", cascade="all, delete-orphan")
     timestamp_items = relationship("TimestampItem", back_populates="project", cascade="all, delete-orphan")
+    tracker_items = relationship("TrackerItem", back_populates="project", cascade="all, delete-orphan")
+    subscribe_items = relationship("SubscribeItem", back_populates="project", cascade="all, delete-orphan")
 
 
 class Clip(Base):
@@ -157,6 +160,30 @@ class TimestampItem(Base):
     end_time = Column(Float, nullable=False)
 
     project = relationship("Project", back_populates="timestamp_items")
+
+
+class TrackerItem(Base):
+    __tablename__ = "tracker_items"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    start_time = Column(Float, nullable=False)
+    end_time = Column(Float, nullable=False)
+    overlay_path = Column(String, nullable=False)
+
+    project = relationship("Project", back_populates="tracker_items")
+
+
+class SubscribeItem(Base):
+    __tablename__ = "subscribe_items"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    text = Column(String, nullable=False, default="subscribe")
+    start_time = Column(Float, nullable=False)
+    end_time = Column(Float, nullable=False)
+
+    project = relationship("Project", back_populates="subscribe_items")
 
 
 class AppSettings(Base):

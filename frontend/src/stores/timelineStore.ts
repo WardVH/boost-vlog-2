@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { RefObject } from "react";
 import type { PlayerRef } from "@remotion/player";
-import type { Project, Clip, TimelineItem, Asset, MusicItem, TitleItem, CaptionItem, TimestampItem, VolumeKeypoint } from "../types";
+import type { Project, Clip, TimelineItem, Asset, MusicItem, TitleItem, CaptionItem, TimestampItem, TrackerItem, SubscribeItem, VolumeKeypoint } from "../types";
 
 interface TimelineStore {
   project: Project | null;
@@ -79,6 +79,22 @@ interface TimelineStore {
   setTimestampItems: (items: TimestampItem[]) => void;
   setTimestampLoading: (loading: boolean) => void;
   updateTimestampItem: (id: number, updates: Partial<TimestampItem>) => void;
+
+  // Tracker overlays
+  trackerItems: TrackerItem[];
+  trackerLoading: boolean;
+  setTrackerItems: (items: TrackerItem[]) => void;
+  setTrackerLoading: (loading: boolean) => void;
+
+  // Subscribe overlays
+  subscribeItems: SubscribeItem[];
+  subscribeLoading: boolean;
+  setSubscribeItems: (items: SubscribeItem[]) => void;
+  setSubscribeLoading: (loading: boolean) => void;
+
+  // Remix clips
+  remixLoading: boolean;
+  setRemixLoading: (loading: boolean) => void;
 
   // Auto-save status
   saveStatus: "idle" | "saving" | "saved";
@@ -200,6 +216,19 @@ export const useTimelineStore = create<TimelineStore>((set) => ({
         t.id === id ? { ...t, ...updates } : t
       ),
     })),
+
+  trackerItems: [],
+  trackerLoading: false,
+  setTrackerItems: (trackerItems) => set({ trackerItems }),
+  setTrackerLoading: (trackerLoading) => set({ trackerLoading }),
+
+  subscribeItems: [],
+  subscribeLoading: false,
+  setSubscribeItems: (subscribeItems) => set({ subscribeItems }),
+  setSubscribeLoading: (subscribeLoading) => set({ subscribeLoading }),
+
+  remixLoading: false,
+  setRemixLoading: (remixLoading) => set({ remixLoading }),
 
   saveStatus: "idle" as const,
   setSaveStatus: (saveStatus) => set({ saveStatus }),

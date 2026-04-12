@@ -25,6 +25,14 @@ const effects = {
     id: "timestamp",
     name: "Timestamp",
   },
+  tracker: {
+    id: "tracker",
+    name: "Tracker",
+  },
+  subscribe: {
+    id: "subscribe",
+    name: "Subscribe",
+  },
 };
 
 const SCALE = 5; // seconds per tick
@@ -34,11 +42,14 @@ const DEFAULT_SCALE_WIDTH = 160;
 
 export function Timeline() {
   const {
-    project, timelineItems, musicItems, playerRef,
+    project, timelineItems, setTimelineItems, musicItems, playerRef,
     setMusicItems, setVolumeEnvelope, musicLoading, setMusicLoading,
     titleItems, setTitleItems, titleLoading, setTitleLoading, updateTitleItem,
     captionItems, setCaptionItems, captionLoading, setCaptionLoading, updateCaptionItem,
     timestampItems, setTimestampItems, timestampLoading, setTimestampLoading, updateTimestampItem,
+    trackerItems, setTrackerItems, trackerLoading, setTrackerLoading,
+    subscribeItems, setSubscribeItems, subscribeLoading, setSubscribeLoading,
+    remixLoading, setRemixLoading,
   } = useTimelineStore();
   const timelineRef = useRef<TimelineState>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -54,8 +65,8 @@ export function Timeline() {
   const [editingTimestampText, setEditingTimestampText] = useState("");
 
   const { rows, totalDuration } = useMemo(
-    () => toEditorData(timelineItems, musicItems, titleItems, captionItems, timestampItems),
-    [timelineItems, musicItems, titleItems, captionItems, timestampItems]
+    () => toEditorData(timelineItems, musicItems, titleItems, captionItems, timestampItems, trackerItems, subscribeItems),
+    [timelineItems, musicItems, titleItems, captionItems, timestampItems, trackerItems, subscribeItems]
   );
 
   // Auto-fit: calculate scaleWidth so all clips fit in the container
@@ -246,7 +257,96 @@ export function Timeline() {
     });
   };
 
+  const handleAddTrackers = async () => {
+    if (!project) return;
+    setTrackerLoading(true);
+    try {
+      const res = await fetch(`/api/trackers/${project.id}/auto`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setTrackerItems(data.items);
+      }
+    } finally {
+      setTrackerLoading(false);
+    }
+  };
+
+  const handleClearTrackers = async () => {
+    if (!project) return;
+    await fetch(`/api/trackers/${project.id}`, { method: "DELETE" });
+    setTrackerItems([]);
+  };
+
+  const handleAddSubscribe = async () => {
+    if (!project) return;
+    setSubscribeLoading(true);
+    try {
+      const res = await fetch(`/api/subscribes/${project.id}/auto`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setSubscribeItems(data.items);
+      }
+    } finally {
+      setSubscribeLoading(false);
+    }
+  };
+
+  const handleClearSubscribe = async () => {
+    if (!project) return;
+    await fetch(`/api/subscribes/${project.id}`, { method: "DELETE" });
+    setSubscribeItems([]);
+  };
+
+  const handleAddRemixes = async () => {
+    if (!project) return;
+    setRemixLoading(true);
+    try {
+      const res = await fetch(`/api/remixes/${project.id}/auto`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setTimelineItems(data.items);
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(err?.detail || "Failed to generate remixes");
+      }
+    } finally {
+      setRemixLoading(false);
+    }
+  };
+
+  const handleClearRemixes = async () => {
+    if (!project) return;
+    const res = await fetch(`/api/remixes/${project.id}`, { method: "DELETE" });
+    if (res.ok) {
+      const data = await res.json();
+      setTimelineItems(data.items);
+    }
+  };
+
   if (!project) return null;
+
+  const trackLabels = useMemo(() => {
+    const labels: { id: string; track: string; label: string; hasItems: boolean; loading: boolean; onAdd: () => void; onClear: () => void }[] = [];
+    for (const row of rows) {
+      if (row.id === "video-track") {
+        const hasRemixes = timelineItems.some(i => i.clip_type === "remix");
+        labels.push({ id: row.id, track: "remix", label: "Remixes", hasItems: hasRemixes, loading: remixLoading, onAdd: handleAddRemixes, onClear: handleClearRemixes });
+      } else if (row.id === "music-track") {
+        labels.push({ id: row.id, track: "music", label: "Music", hasItems: musicItems.length > 0, loading: musicLoading, onAdd: handleAddMusic, onClear: handleClearMusic });
+      } else if (row.id === "title-track") {
+        labels.push({ id: row.id, track: "title", label: "Titles", hasItems: titleItems.length > 0, loading: titleLoading, onAdd: handleAddTitles, onClear: handleClearTitles });
+      } else if (row.id === "caption-track") {
+        labels.push({ id: row.id, track: "caption", label: "Captions", hasItems: captionItems.length > 0, loading: captionLoading, onAdd: handleAddCaptions, onClear: handleClearCaptions });
+      } else if (row.id === "timestamp-track") {
+        labels.push({ id: row.id, track: "timestamp", label: "Timestamps", hasItems: timestampItems.length > 0, loading: timestampLoading, onAdd: handleAddTimestamps, onClear: handleClearTimestamps });
+      } else if (row.id === "tracker-track") {
+        labels.push({ id: row.id, track: "tracker", label: "Trackers", hasItems: trackerItems.length > 0, loading: trackerLoading, onAdd: handleAddTrackers, onClear: handleClearTrackers });
+      } else if (row.id === "subscribe-track") {
+        labels.push({ id: row.id, track: "subscribe", label: "Subscribe", hasItems: subscribeItems.length > 0, loading: subscribeLoading, onAdd: handleAddSubscribe, onClear: handleClearSubscribe });
+      }
+    }
+    return labels;
+  }, [rows, timelineItems, musicItems, titleItems, captionItems, timestampItems, trackerItems, subscribeItems, remixLoading, musicLoading, titleLoading, captionLoading, timestampLoading, trackerLoading, subscribeLoading]);
 
   return (
     <div className="timeline-container">
@@ -271,89 +371,31 @@ export function Timeline() {
             Fit all
           </label>
           <span className="timeline-duration">{totalDuration.toFixed(1)}s</span>
-          <div className="music-controls">
-            <button
-              className="btn btn-sm"
-              onClick={handleAddMusic}
-              disabled={musicLoading || timelineItems.length === 0}
-            >
-              {musicLoading ? "Adding..." : "Add Music"}
-            </button>
-            {musicItems.length > 0 && (
-              <>
-                <button className="btn btn-sm btn-ghost" onClick={handleClearMusic}>
-                  Clear Music
-                </button>
-                <span className="music-info">
-                  {musicItems.length} song{musicItems.length !== 1 ? "s" : ""}
-                </span>
-              </>
-            )}
-          </div>
-          <div className="title-controls">
-            <button
-              className="btn btn-sm"
-              onClick={handleAddTitles}
-              disabled={titleLoading || timelineItems.length === 0}
-            >
-              {titleLoading ? "Adding..." : "Add Titles"}
-            </button>
-            {titleItems.length > 0 && (
-              <>
-                <button className="btn btn-sm btn-ghost" onClick={handleClearTitles}>
-                  Clear Titles
-                </button>
-                <span className="title-info">
-                  {titleItems.length} title{titleItems.length !== 1 ? "s" : ""}
-                </span>
-              </>
-            )}
-          </div>
-          <div className="caption-controls">
-            <button
-              className="btn btn-sm"
-              onClick={handleAddCaptions}
-              disabled={captionLoading || timelineItems.length === 0}
-            >
-              {captionLoading ? "Adding..." : "Add Captions"}
-            </button>
-            {captionItems.length > 0 && (
-              <>
-                <button className="btn btn-sm btn-ghost" onClick={handleClearCaptions}>
-                  Clear Captions
-                </button>
-                <span className="caption-info">
-                  {captionItems.length} caption{captionItems.length !== 1 ? "s" : ""}
-                </span>
-              </>
-            )}
-          </div>
-          <div className="timestamp-controls">
-            <button
-              className="btn btn-sm"
-              onClick={handleAddTimestamps}
-              disabled={timestampLoading || timelineItems.length === 0}
-            >
-              {timestampLoading ? "Adding..." : "Add Timestamps"}
-            </button>
-            {timestampItems.length > 0 && (
-              <>
-                <button className="btn btn-sm btn-ghost" onClick={handleClearTimestamps}>
-                  Clear Timestamps
-                </button>
-                <span className="timestamp-info">
-                  {timestampItems.length} timestamp{timestampItems.length !== 1 ? "s" : ""}
-                </span>
-              </>
-            )}
-          </div>
         </div>
       </div>
       {rows[0]?.actions.length === 0 ? (
         <p className="timeline-empty">Timeline is empty. Process some clips to get started.</p>
       ) : (
-        <div className="timeline-editor-wrapper" ref={wrapperRef}>
-          <TimelineEditor
+        <>
+        <div className="timeline-with-sidebar">
+          <div className="track-sidebar">
+            <div className="track-sidebar-ruler" />
+            {trackLabels.map((track) => (
+              <div key={track.id} className="track-sidebar-cell">
+                <button
+                  className={`track-sidebar-btn ${track.loading ? "loading" : ""}`}
+                  data-track={track.hasItems || track.loading ? track.track : undefined}
+                  onClick={track.hasItems ? track.onClear : track.onAdd}
+                  disabled={track.loading || timelineItems.length === 0}
+                  title={track.hasItems ? `Clear ${track.label}` : `Add ${track.label}`}
+                >
+                  {track.loading ? track.label : track.hasItems ? `\u00d7 ${track.label}` : `+ ${track.label}`}
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="timeline-editor-wrapper" ref={wrapperRef}>
+            <TimelineEditor
             ref={timelineRef}
             editorData={rows}
             effects={effects}
@@ -463,6 +505,16 @@ export function Timeline() {
                   </div>
                 );
               }
+              if (action.effectId === "tracker") {
+                return (
+                  <div className="tl-action-render tracker" title="Tracker overlay">
+                    <span className="tl-action-label">Tracker</span>
+                    <span className="tl-action-dur">
+                      {(action.end - action.start).toFixed(1)}s
+                    </span>
+                  </div>
+                );
+              }
               if (action.effectId === "music") {
                 const m = action as MusicAction;
                 return (
@@ -475,10 +527,10 @@ export function Timeline() {
                 );
               }
               const a = action as VideoAction;
-              const isBroll = a.clipType === "broll";
+              const clipClass = a.clipType === "broll" ? "broll" : a.clipType === "remix" ? "remix" : "talking";
               return (
                 <div
-                  className={`tl-action-render ${isBroll ? "broll" : "talking"}`}
+                  className={`tl-action-render ${clipClass}`}
                   title={a.label}
                 >
                   <span className="tl-action-label">{a.label}</span>
@@ -489,7 +541,9 @@ export function Timeline() {
               );
             }}
           />
+          </div>
         </div>
+        </>
       )}
     </div>
   );

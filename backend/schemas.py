@@ -220,6 +220,44 @@ class TimestampAutoResponse(BaseModel):
     items: list[TimestampItemResponse]
 
 
+class TrackerItemResponse(BaseModel):
+    id: int
+    start_time: float
+    end_time: float
+    overlay_url: str
+
+    class Config:
+        from_attributes = True
+
+
+class TrackerAutoResponse(BaseModel):
+    items: list[TrackerItemResponse]
+
+
+class SubscribeItemResponse(BaseModel):
+    id: int
+    text: str
+    start_time: float
+    end_time: float
+
+    class Config:
+        from_attributes = True
+
+
+class SubscribeItemUpdate(BaseModel):
+    text: str | None = None
+    start_time: float | None = None
+    end_time: float | None = None
+
+
+class SubscribeAutoResponse(BaseModel):
+    items: list[SubscribeItemResponse]
+
+
+class RemixAutoResponse(BaseModel):
+    items: list[TimelineItemResponse]
+
+
 class SettingsResponse(BaseModel):
     timezone: str
 

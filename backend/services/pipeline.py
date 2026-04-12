@@ -184,15 +184,20 @@ async def process_clip(clip_id: int):
                 "progress": 80, "detail": "picking b-roll moments",
             })
 
+            min_duration_for_moments = BROLL_NUM_CLIPS * BROLL_CLIP_DURATION
             # Evenly space clips, avoiding first/last 2 seconds
             margin = 2.0 if total_duration > (BROLL_CLIP_DURATION + 4) else 0
             usable_start = margin
             usable_end = total_duration - margin
             usable_duration = usable_end - usable_start
 
-            if usable_duration < BROLL_CLIP_DURATION:
-                # Clip too short, just use the whole thing
-                moments = [{"start": 0, "end": min(BROLL_CLIP_DURATION, total_duration)}]
+            if total_duration < min_duration_for_moments:
+                # Under 6s: use the full clip as-is
+                moments = [{"start": 0, "end": total_duration}]
+            elif total_duration < 9:
+                # 6-9s: trim to middle 6 seconds
+                mid = total_duration / 2
+                moments = [{"start": mid - 3, "end": mid + 3}]
             else:
                 step = usable_duration / (BROLL_NUM_CLIPS + 1)
                 moments = []

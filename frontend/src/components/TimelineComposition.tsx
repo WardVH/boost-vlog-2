@@ -2,7 +2,7 @@ import React, { useCallback, useMemo } from "react";
 import { AbsoluteFill, Audio, OffthreadVideo, Sequence, useCurrentFrame } from "remotion";
 import { secondsToFrames, interpolateEnvelope, FPS } from "../lib/remotion";
 import { useTimelineStore } from "../stores/timelineStore";
-import type { TimelineItem, MusicItem, TitleItem, CaptionItem, TimestampItem, VolumeKeypoint } from "../types";
+import type { TimelineItem, MusicItem, TitleItem, CaptionItem, TimestampItem, TrackerItem, SubscribeItem, VolumeKeypoint } from "../types";
 
 const PREMOUNT_FRAMES = 30;
 const BROLL_AUDIO_VOLUME = 0.15;
@@ -14,6 +14,8 @@ export interface Props {
   titleItems?: TitleItem[];
   captionItems?: CaptionItem[];
   timestampItems?: TimestampItem[];
+  trackerItems?: TrackerItem[];
+  subscribeItems?: SubscribeItem[];
   /** Base URL prefix for API paths during server-side render (e.g. "http://localhost:8000") */
   baseUrl?: string;
   /** Local file paths for SFX (server-side render only) */
@@ -34,6 +36,8 @@ export const TimelineComposition: React.FC<Props> = React.memo(({
   titleItems: propTitles,
   captionItems: propCaptions,
   timestampItems: propTimestamps,
+  trackerItems: propTrackers,
+  subscribeItems: propSubscribes,
   baseUrl = "",
   sfxTitleInPath,
   sfxTitleOutPath,
@@ -103,6 +107,8 @@ export const TimelineComposition: React.FC<Props> = React.memo(({
       <TitleLayer titleItems={propTitles} baseUrl={baseUrl} sfxTitleInPath={sfxTitleInPath} sfxTitleOutPath={sfxTitleOutPath} />
       <CaptionLayer captionItems={propCaptions} />
       <TimestampLayer timestampItems={propTimestamps} />
+      <TrackerLayer trackerItems={propTrackers} baseUrl={baseUrl} />
+      <SubscribeLayer subscribeItems={propSubscribes} />
     </AbsoluteFill>
   );
 });
@@ -280,6 +286,109 @@ const TimestampLayer: React.FC<{ timestampItems?: TimestampItem[] }> = ({ timest
             durationInFrames={durationInFrames}
           >
             <TimestampOverlay text={ts.text} />
+          </Sequence>
+        );
+      })}
+    </>
+  );
+};
+
+const TrackerLayer: React.FC<{ trackerItems?: TrackerItem[]; baseUrl?: string }> = ({
+  trackerItems: propItems,
+  baseUrl = "",
+}) => {
+  const storeItems = useTimelineStore((s) => s.trackerItems);
+  const trackerItems = propItems ?? storeItems;
+
+  return (
+    <>
+      {trackerItems.map((ti) => {
+        const startFrame = secondsToFrames(ti.start_time);
+        const durationInFrames = secondsToFrames(ti.end_time - ti.start_time);
+        if (durationInFrames <= 0) return null;
+
+        return (
+          <Sequence
+            key={`tracker-${ti.id}`}
+            from={startFrame}
+            durationInFrames={durationInFrames}
+          >
+            <AbsoluteFill>
+              <OffthreadVideo
+                src={`${baseUrl}${ti.overlay_url}`}
+                transparent
+                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+              />
+            </AbsoluteFill>
+          </Sequence>
+        );
+      })}
+    </>
+  );
+};
+
+const SUBSCRIBE_ANIM_FRAMES = 15;
+
+const SubscribeOverlay: React.FC<{ text: string; durationInFrames: number }> = ({ text, durationInFrames }) => {
+  const frame = useCurrentFrame();
+
+  let translateY = 100;
+  if (frame < SUBSCRIBE_ANIM_FRAMES) {
+    translateY = 100 - (frame / SUBSCRIBE_ANIM_FRAMES) * 100;
+  } else if (frame > durationInFrames - SUBSCRIBE_ANIM_FRAMES) {
+    const outFrame = frame - (durationInFrames - SUBSCRIBE_ANIM_FRAMES);
+    translateY = (outFrame / SUBSCRIBE_ANIM_FRAMES) * 100;
+  } else {
+    translateY = 0;
+  }
+
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: "flex-end",
+        alignItems: "center",
+        paddingBottom: "12%",
+      }}
+    >
+      <div
+        style={{
+          color: "white",
+          fontSize: 48,
+          fontFamily: "'Inter', sans-serif",
+          fontWeight: 700,
+          letterSpacing: "0.05em",
+          textTransform: "uppercase",
+          textShadow: "0 0 16px rgba(0,0,0,0.8), 0 2px 4px rgba(0,0,0,0.6)",
+          transform: `translateY(${translateY}%)`,
+          padding: "10px 28px",
+          borderRadius: 8,
+          backgroundColor: "rgba(255, 0, 0, 0.85)",
+        }}
+      >
+        {text}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const SubscribeLayer: React.FC<{ subscribeItems?: SubscribeItem[] }> = ({ subscribeItems: propItems }) => {
+  const storeItems = useTimelineStore((s) => s.subscribeItems);
+  const subscribeItems = propItems ?? storeItems;
+
+  return (
+    <>
+      {subscribeItems.map((si) => {
+        const startFrame = secondsToFrames(si.start_time);
+        const durationInFrames = secondsToFrames(si.end_time - si.start_time);
+        if (durationInFrames <= 0) return null;
+
+        return (
+          <Sequence
+            key={`subscribe-${si.id}`}
+            from={startFrame}
+            durationInFrames={durationInFrames}
+          >
+            <SubscribeOverlay text={si.text} durationInFrames={durationInFrames} />
           </Sequence>
         );
       })}

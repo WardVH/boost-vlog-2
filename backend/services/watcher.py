@@ -30,8 +30,11 @@ class VideoFileHandler(FileSystemEventHandler):
         self.loop = loop
 
     def _maybe_handle(self, path: str, event_type: str):
+        name = Path(path).name
         ext = Path(path).suffix.lower()
         logger.info(f"[WATCHER] {event_type}: {path} (ext={ext}, is_video={ext in VIDEO_EXTENSIONS})")
+        if name.startswith("._"):
+            return
         if ext in VIDEO_EXTENSIONS:
             asyncio.run_coroutine_threadsafe(
                 self._handle_new_file(path), self.loop
@@ -135,7 +138,7 @@ def _scan_existing(project_id: int, directory: str) -> list[int]:
         # Discover video files
         paths = [
             str(entry) for entry in Path(directory).iterdir()
-            if entry.is_file() and entry.suffix.lower() in VIDEO_EXTENSIONS
+            if entry.is_file() and not entry.name.startswith("._") and entry.suffix.lower() in VIDEO_EXTENSIONS
         ]
 
         # Filter out files already in DB
