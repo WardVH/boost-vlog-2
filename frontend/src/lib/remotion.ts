@@ -1,4 +1,4 @@
-import type { TimelineRow, TimelineAction } from "@xzdarcy/react-timeline-editor";
+import type { TimelineRow, TimelineAction } from "@xzdarcy/timeline-engine";
 import type { TimelineItem, MusicItem, TitleItem, CaptionItem, TimestampItem, TrackerItem, SubscribeItem, VolumeKeypoint } from "../types";
 
 export const FPS = 30;

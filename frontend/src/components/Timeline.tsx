@@ -516,7 +516,7 @@ export function Timeline() {
                 );
               }
               if (action.effectId === "music") {
-                const m = action as MusicAction;
+                const m = action as unknown as MusicAction;
                 return (
                   <div className="tl-action-render music" title={m.assetName}>
                     <span className="tl-action-label">{m.assetName}</span>
@@ -526,7 +526,7 @@ export function Timeline() {
                   </div>
                 );
               }
-              const a = action as VideoAction;
+              const a = action as unknown as VideoAction;
               const clipClass = a.clipType === "broll" ? "broll" : a.clipType === "remix" ? "remix" : "talking";
               return (
                 <div

@@ -3,10 +3,13 @@ import { registerRoot, Composition } from "remotion";
 import { TimelineComposition } from "../components/TimelineComposition";
 import { FPS } from "../lib/remotion";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Comp = TimelineComposition as React.FC<any>;
+
 const RemotionRoot: React.FC = () => (
   <Composition
     id="Timeline"
-    component={TimelineComposition}
+    component={Comp}
     fps={FPS}
     width={1920}
     height={1080}
